@@ -1265,6 +1265,27 @@ button.text-button:hover:not(:disabled),
   text-transform: uppercase;
 }
 
+.source-summary-metrics {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.source-run-details {
+  display: grid;
+  gap: 5px;
+  min-width: 170px;
+}
+
+.source-run-details strong {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.source-run-details span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
 .state-panel {
   display: grid;
   gap: 6px;

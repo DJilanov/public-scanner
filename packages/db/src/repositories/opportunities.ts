@@ -128,6 +128,12 @@ interface SourceHealthRow extends QueryResultRow {
   skipped_count: number | null;
   failed_count: number | null;
   recent_error_count: string | null;
+  open_opportunity_count: number | null;
+  high_fit_opportunity_count: number | null;
+  ready_opportunity_count: number | null;
+  document_url_count: number | null;
+  submission_url_count: number | null;
+  latest_opportunity_at: Date | string | null;
   error_message: string | null;
 }
 
@@ -682,7 +688,13 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
             latest.skipped_count,
             latest.failed_count,
             latest.error_message,
-            coalesce(errors.recent_error_count, '0') AS recent_error_count
+            coalesce(errors.recent_error_count, '0') AS recent_error_count,
+            coalesce(metrics.open_opportunity_count, 0) AS open_opportunity_count,
+            coalesce(metrics.high_fit_opportunity_count, 0) AS high_fit_opportunity_count,
+            coalesce(metrics.ready_opportunity_count, 0) AS ready_opportunity_count,
+            coalesce(metrics.document_url_count, 0) AS document_url_count,
+            coalesce(metrics.submission_url_count, 0) AS submission_url_count,
+            metrics.latest_opportunity_at
           FROM sources
           LEFT JOIN LATERAL (
             SELECT
@@ -710,6 +722,49 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
               )
               AND source_errors.created_at >= now() - interval '7 days'
           ) errors ON true
+          LEFT JOIN LATERAL (
+            SELECT
+              count(*) FILTER (
+                WHERE o.status IN ('forthcoming', 'open')
+              )::integer AS open_opportunity_count,
+              count(*) FILTER (
+                WHERE o.status IN ('forthcoming', 'open')
+                  AND coalesce(m.score, 0) >= 70
+              )::integer AS high_fit_opportunity_count,
+              count(*) FILTER (
+                WHERE o.status IN ('forthcoming', 'open')
+                  AND coalesce(m.score, 0) >= 70
+                  AND (
+                    coalesce(array_length(o.document_urls, 1), 0) > 0
+                    OR coalesce(array_length(o.submission_urls, 1), 0) > 0
+                  )
+              )::integer AS ready_opportunity_count,
+              count(*) FILTER (
+                WHERE o.status IN ('forthcoming', 'open')
+                  AND coalesce(array_length(o.document_urls, 1), 0) > 0
+              )::integer AS document_url_count,
+              count(*) FILTER (
+                WHERE o.status IN ('forthcoming', 'open')
+                  AND coalesce(array_length(o.submission_urls, 1), 0) > 0
+              )::integer AS submission_url_count,
+              max(coalesce(o.publication_date, o.updated_at)) AS latest_opportunity_at
+            FROM opportunities o
+            LEFT JOIN opportunity_matches m ON m.opportunity_id = o.id
+            WHERE (
+                ${sourceIdSql("o")} = sources.source
+                OR (
+                  sources.legacy_source IS NOT NULL
+                  AND o.source = sources.legacy_source
+                )
+                OR (
+                  sources.legacy_source IS NULL
+                  AND sources.source_country_code IS NOT NULL
+                  AND o.source = 'ted'
+                  AND ${buyerCountrySql("o")} = sources.source_country_code
+                )
+              )
+              ${sourceHealth.metricWhereSql}
+          ) metrics ON true
           ORDER BY sources.source ASC
         `,
         sourceHealth.values
@@ -1071,6 +1126,20 @@ function mapSupplierDashboardRow(row: SupplierDashboardRow): SupplierDashboardIt
 
 function mapSourceHealthRow(row: SourceHealthRow): SourceHealthItem {
   const sourceCountryCode = normalizeOptionalCountryCode(row.source_country_code);
+  const fetchedCount = row.fetched_count ?? 0;
+  const insertedCount = row.inserted_count ?? 0;
+  const updatedCount = row.updated_count ?? 0;
+  const skippedCount = row.skipped_count ?? 0;
+  const failedCount = row.failed_count ?? 0;
+  const recentErrorCount = Number(row.recent_error_count ?? 0);
+  const openOpportunityCount = row.open_opportunity_count ?? 0;
+  const highFitOpportunityCount = row.high_fit_opportunity_count ?? 0;
+  const readyOpportunityCount = row.ready_opportunity_count ?? 0;
+  const documentUrlCount = row.document_url_count ?? 0;
+  const submissionUrlCount = row.submission_url_count ?? 0;
+  const latestOpportunityAt = row.latest_opportunity_at
+    ? normalizeDbDate(row.latest_opportunity_at)
+    : undefined;
 
   return {
     source: row.source,
@@ -1078,17 +1147,93 @@ function mapSourceHealthRow(row: SourceHealthRow): SourceHealthItem {
       ? { sourceDisplayName: row.source_display_name }
       : {}),
     ...(sourceCountryCode ? { sourceCountryCode } : {}),
-    fetchedCount: row.fetched_count ?? 0,
-    insertedCount: row.inserted_count ?? 0,
-    updatedCount: row.updated_count ?? 0,
-    skippedCount: row.skipped_count ?? 0,
-    failedCount: row.failed_count ?? 0,
-    recentErrorCount: Number(row.recent_error_count ?? 0),
+    fetchedCount,
+    insertedCount,
+    updatedCount,
+    skippedCount,
+    failedCount,
+    recentErrorCount,
+    openOpportunityCount,
+    highFitOpportunityCount,
+    readyOpportunityCount,
+    documentUrlCount,
+    submissionUrlCount,
+    readinessScore: calculateSourceReadinessScore({
+      status: row.status,
+      failedCount,
+      recentErrorCount,
+      openOpportunityCount,
+      highFitOpportunityCount,
+      readyOpportunityCount,
+      documentUrlCount,
+      submissionUrlCount,
+      ...(latestOpportunityAt ? { latestOpportunityAt } : {})
+    }),
     ...(row.status ? { status: row.status } : {}),
     ...(row.started_at ? { startedAt: normalizeDbDate(row.started_at) } : {}),
     ...(row.finished_at ? { finishedAt: normalizeDbDate(row.finished_at) } : {}),
+    ...(latestOpportunityAt ? { latestOpportunityAt } : {}),
     ...(row.error_message !== null ? { errorMessage: row.error_message } : {})
   };
+}
+
+function calculateSourceReadinessScore(input: {
+  status: SourceHealthItem["status"] | null;
+  failedCount: number;
+  recentErrorCount: number;
+  openOpportunityCount: number;
+  highFitOpportunityCount: number;
+  readyOpportunityCount: number;
+  documentUrlCount: number;
+  submissionUrlCount: number;
+  latestOpportunityAt?: string;
+}): number {
+  let score = 0;
+
+  if (input.status === "succeeded") {
+    score += 30;
+  } else if (input.status === "running" || input.status === "partial") {
+    score += 18;
+  } else if (!input.status) {
+    score += 8;
+  }
+
+  if (input.failedCount === 0 && input.recentErrorCount === 0) {
+    score += 15;
+  } else if (input.recentErrorCount <= 2) {
+    score += 8;
+  }
+
+  if (input.latestOpportunityAt) {
+    const ageMs = Date.now() - new Date(input.latestOpportunityAt).getTime();
+    const ageDays = ageMs / (1000 * 60 * 60 * 24);
+    if (ageDays <= 7) {
+      score += 20;
+    } else if (ageDays <= 30) {
+      score += 12;
+    } else {
+      score += 5;
+    }
+  }
+
+  if (input.openOpportunityCount > 0) {
+    score += 10;
+  }
+
+  if (input.highFitOpportunityCount > 0) {
+    score += 10;
+  }
+
+  if (input.readyOpportunityCount > 0) {
+    score += 10;
+  } else if (input.openOpportunityCount > 0) {
+    const linkCoverage =
+      (input.documentUrlCount + input.submissionUrlCount) /
+      Math.max(input.openOpportunityCount * 2, 1);
+    score += Math.round(Math.min(linkCoverage, 1) * 10);
+  }
+
+  return Math.min(score, 100);
 }
 
 function mapDashboardDocumentIntelligence(
@@ -1252,6 +1397,7 @@ interface SqlWhere {
 interface SourceHealthQuery {
   withSql: string;
   values: unknown[];
+  metricWhereSql: string;
 }
 
 function buildOpportunityWhere(
@@ -1363,7 +1509,8 @@ function buildSourceHealthQuery(filters: OpportunityListFilters): SourceHealthQu
             ) AS empty_sources(source, source_display_name, source_country_code, legacy_source)
             WHERE false
           )`,
-      values: []
+      values: [],
+      metricWhereSql: ""
     };
   }
 
@@ -1380,6 +1527,9 @@ function buildSourceHealthQuery(filters: OpportunityListFilters): SourceHealthQu
     return `($${startIndex}::text, $${startIndex + 1}::text, $${startIndex + 2}::text, $${startIndex + 3}::text)`;
   });
 
+  const metricConditions: string[] = [];
+  appendSourceMetricOpportunityConditions("o", filters, metricConditions, values);
+
   return {
     withSql: `
           WITH sources(
@@ -1390,7 +1540,9 @@ function buildSourceHealthQuery(filters: OpportunityListFilters): SourceHealthQu
           ) AS (
             VALUES ${rows.join(", ")}
           )`,
-    values
+    values,
+    metricWhereSql:
+      metricConditions.length > 0 ? `AND ${metricConditions.join(" AND ")}` : ""
   };
 }
 
@@ -1435,6 +1587,59 @@ function getSourceHealthCatalogItems(filters: OpportunityListFilters) {
   }
 
   return sources;
+}
+
+function appendSourceMetricOpportunityConditions(
+  alias: string,
+  filters: OpportunityListFilters,
+  conditions: string[],
+  values: unknown[]
+): void {
+  const countryCodes = normalizeOptionalCountryCodes(filters.countryCodes ?? []);
+  const internationalSourceIds = filters.includeInternationalSources
+    ? normalizeSourceFilterIds(
+        filters.selectedInternationalSourceIds?.length
+          ? filters.selectedInternationalSourceIds
+          : SOURCE_CATALOG.filter((source) => source.isInternational).map(
+              (source) => source.id
+            )
+      )
+    : [];
+
+  if (countryCodes.length > 0) {
+    values.push(countryCodes);
+    const countryIndex = values.length;
+    const countryConditions = [
+      `${buyerCountrySql(alias)} = ANY($${countryIndex}::text[])`,
+      `${sourceCountrySql(alias)} = ANY($${countryIndex}::text[])`,
+      `coalesce(${alias}.place_of_performance_country_codes, ARRAY[]::text[]) && $${countryIndex}::text[]`
+    ];
+
+    if (internationalSourceIds.length > 0) {
+      values.push(internationalSourceIds);
+      countryConditions.push(
+        `(
+          ${sourceIdSql(alias)} = ANY($${values.length}::text[])
+          AND ${buyerCountrySql(alias)} IS NULL
+          AND ${sourceCountrySql(alias)} IS NULL
+          AND cardinality(coalesce(${alias}.place_of_performance_country_codes, ARRAY[]::text[])) = 0
+        )`
+      );
+    }
+
+    conditions.push(`(${countryConditions.join(" OR ")})`);
+  } else if (internationalSourceIds.length > 0) {
+    values.push(internationalSourceIds);
+    conditions.push(`${sourceIdSql(alias)} = ANY($${values.length}::text[])`);
+  }
+
+  const opportunityKinds = normalizeOpportunityKinds(filters.opportunityKinds ?? []);
+  if (opportunityKinds.length > 0) {
+    values.push(opportunityKinds);
+    conditions.push(
+      `coalesce(${alias}.opportunity_kind, 'procurement') = ANY($${values.length}::text[])`
+    );
+  }
 }
 
 function sourceIdSql(alias: string): string {

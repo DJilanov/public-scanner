@@ -134,7 +134,14 @@ const dashboard: ProcurementDashboard = {
       updatedCount: 12,
       skippedCount: 34,
       failedCount: 0,
-      recentErrorCount: 0
+      recentErrorCount: 0,
+      openOpportunityCount: 6,
+      highFitOpportunityCount: 3,
+      readyOpportunityCount: 2,
+      documentUrlCount: 4,
+      submissionUrlCount: 3,
+      readinessScore: 88,
+      latestOpportunityAt: "2026-07-23T00:00:00.000Z"
     }
   ]
 };

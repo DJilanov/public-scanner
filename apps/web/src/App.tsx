@@ -641,6 +641,14 @@ const TRANSLATIONS = {
     sourceActiveFetcher: "Active fetcher",
     sourceTedCoverage: "TED high-value coverage; national connector planned",
     sourcePlannedConnector: "National connector planned",
+    sourceReadiness: "Source readiness",
+    averageReadiness: "Average readiness",
+    readyToPreview: "Ready to preview",
+    detectedDocuments: "Detected documents",
+    submissionLinks: "Submission links",
+    latestOpportunity: "Newest opportunity",
+    runDetails: "Run details",
+    highFitOpportunities: "High fit",
     activeBids: "Active bids",
     documentRisks: "Document risks",
     sourceProblems: "Source problems",
@@ -1020,6 +1028,14 @@ const TRANSLATIONS = {
     sourceTedCoverage:
       "TED покритие за високи стойности; националният connector е планиран",
     sourcePlannedConnector: "Планиран национален connector",
+    sourceReadiness: "Готовност на източника",
+    averageReadiness: "Средна готовност",
+    readyToPreview: "Готови за преглед",
+    detectedDocuments: "Открити документи",
+    submissionLinks: "Линкове за подаване",
+    latestOpportunity: "Най-нова възможност",
+    runDetails: "Детайли за стартиране",
+    highFitOpportunities: "Силно съвпадение",
     activeBids: "Активни участия",
     documentRisks: "Документни рискове",
     sourceProblems: "Проблеми с източници",
@@ -3560,7 +3576,7 @@ function OverviewPage({
             items={dashboard.sources.map((source) => ({
               id: source.source,
               title: formatSourceLabel(source),
-              meta: `${formatSourceRunStatus(source.status, locale)} - ${source.recentErrorCount} ${t(locale, "recentErrors")}`
+              meta: `${source.readinessScore}/100 - ${source.openOpportunityCount} ${t(locale, "open")} - ${source.highFitOpportunityCount} ${t(locale, "highFitOpportunities")}`
             }))}
           />
         </DashboardPanel>
@@ -4643,6 +4659,30 @@ function SourcesPage({
   sources,
   onRefresh
 }: SourcesPageProps) {
+  const totalOpenOpportunities = sources.reduce(
+    (total, source) => total + source.openOpportunityCount,
+    0
+  );
+  const totalHighFitOpportunities = sources.reduce(
+    (total, source) => total + source.highFitOpportunityCount,
+    0
+  );
+  const totalReadyOpportunities = sources.reduce(
+    (total, source) => total + source.readyOpportunityCount,
+    0
+  );
+  const totalDetectedDocuments = sources.reduce(
+    (total, source) => total + source.documentUrlCount,
+    0
+  );
+  const averageReadiness =
+    sources.length > 0
+      ? Math.round(
+          sources.reduce((total, source) => total + source.readinessScore, 0) /
+            sources.length
+        )
+      : 0;
+
   return (
     <section className="content" id="sources">
       <WorkspaceHeader
@@ -4653,23 +4693,46 @@ function SourcesPage({
         loading={dashboardLoadState === "loading"}
         onRefresh={onRefresh}
       />
+      <section
+        className="metrics source-summary-metrics"
+        aria-label={t(locale, "sourcesTitle")}
+      >
+        <Metric label={t(locale, "averageReadiness")} value={`${averageReadiness}/100`} />
+        <Metric
+          label={t(locale, "openOpportunities")}
+          value={String(totalOpenOpportunities)}
+        />
+        <Metric
+          label={t(locale, "highFitOpportunities")}
+          value={String(totalHighFitOpportunities)}
+        />
+        <Metric
+          label={t(locale, "readyToPreview")}
+          value={String(totalReadyOpportunities)}
+        />
+        <Metric
+          label={t(locale, "detectedDocuments")}
+          value={String(totalDetectedDocuments)}
+        />
+      </section>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
               <th scope="col">{t(locale, "source")}</th>
-              <th scope="col">{t(locale, "sourceHealth")}</th>
-              <th scope="col">{t(locale, "lastRun")}</th>
-              <th scope="col">{t(locale, "fetched")}</th>
-              <th scope="col">{t(locale, "inserted")}</th>
-              <th scope="col">{t(locale, "updated")}</th>
-              <th scope="col">{t(locale, "failed")}</th>
-              <th scope="col">{t(locale, "recentErrors")}</th>
+              <th scope="col">{t(locale, "sourceReadiness")}</th>
+              <th scope="col">{t(locale, "openOpportunities")}</th>
+              <th scope="col">{t(locale, "highFitOpportunities")}</th>
+              <th scope="col">{t(locale, "readyToPreview")}</th>
+              <th scope="col">{t(locale, "detectedDocuments")}</th>
+              <th scope="col">{t(locale, "submissionLinks")}</th>
+              <th scope="col">{t(locale, "latestOpportunity")}</th>
+              <th scope="col">{t(locale, "runDetails")}</th>
             </tr>
           </thead>
           <tbody>
             {sources.length === 0 ? (
-              <EmptyTableRow colSpan={8} label={t(locale, "noSources")} />
+              <EmptyTableRow colSpan={9} label={t(locale, "noSources")} />
             ) : (
               sources.map((source) => (
                 <tr key={source.source}>
@@ -4677,13 +4740,30 @@ function SourcesPage({
                     <span className="source-pill">{formatSourceLabel(source)}</span>
                     <span>{formatSourceConnectorCoverage(source, locale)}</span>
                   </td>
-                  <td>{formatSourceRunStatus(source.status, locale)}</td>
-                  <td>{formatDate(source.finishedAt ?? source.startedAt, locale)}</td>
-                  <td>{source.fetchedCount}</td>
-                  <td>{source.insertedCount}</td>
-                  <td>{source.updatedCount}</td>
-                  <td>{source.failedCount}</td>
-                  <td>{source.recentErrorCount}</td>
+                  <td>
+                    <span className={getSourceReadinessClass(source.readinessScore)}>
+                      {source.readinessScore}
+                    </span>
+                  </td>
+                  <td>{source.openOpportunityCount}</td>
+                  <td>{source.highFitOpportunityCount}</td>
+                  <td>{source.readyOpportunityCount}</td>
+                  <td>{source.documentUrlCount}</td>
+                  <td>{source.submissionUrlCount}</td>
+                  <td>{formatDate(source.latestOpportunityAt, locale)}</td>
+                  <td>
+                    <div className="source-run-details">
+                      <strong>{formatSourceRunStatus(source.status, locale)}</strong>
+                      <span>
+                        {formatDate(source.finishedAt ?? source.startedAt, locale)}
+                      </span>
+                      <span>
+                        {source.fetchedCount} {t(locale, "fetched")} /{" "}
+                        {source.failedCount} {t(locale, "failed")} /{" "}
+                        {source.recentErrorCount} {t(locale, "recentErrors")}
+                      </span>
+                    </div>
+                  </td>
                 </tr>
               ))
             )}
@@ -7906,6 +7986,18 @@ function formatSourceRunStatus(
     case "partial":
       return locale === "bg" ? "частично" : "partial";
   }
+}
+
+function getSourceReadinessClass(score: number): string {
+  if (score >= 80) {
+    return "score score-strong";
+  }
+
+  if (score >= 55) {
+    return "score score-review";
+  }
+
+  return "score score-partner";
 }
 
 function formatSourceLabel(source: SourceHealthItem): string {

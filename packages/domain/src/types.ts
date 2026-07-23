@@ -446,6 +446,13 @@ export interface SourceHealthItem {
   skippedCount: number;
   failedCount: number;
   recentErrorCount: number;
+  openOpportunityCount: number;
+  highFitOpportunityCount: number;
+  readyOpportunityCount: number;
+  documentUrlCount: number;
+  submissionUrlCount: number;
+  readinessScore: number;
+  latestOpportunityAt?: string;
   errorMessage?: string;
 }
 

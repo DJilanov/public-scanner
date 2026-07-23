@@ -136,7 +136,14 @@ const dashboard = {
       updatedCount: 17,
       skippedCount: 0,
       failedCount: 0,
-      recentErrorCount: 0
+      recentErrorCount: 0,
+      openOpportunityCount: 22,
+      highFitOpportunityCount: 11,
+      readyOpportunityCount: 8,
+      documentUrlCount: 12,
+      submissionUrlCount: 10,
+      readinessScore: 94,
+      latestOpportunityAt: "2026-07-23T07:30:00.000Z"
     },
     {
       source: "de-evergabe",
@@ -147,7 +154,14 @@ const dashboard = {
       updatedCount: 0,
       skippedCount: 0,
       failedCount: 0,
-      recentErrorCount: 0
+      recentErrorCount: 0,
+      openOpportunityCount: 5,
+      highFitOpportunityCount: 3,
+      readyOpportunityCount: 2,
+      documentUrlCount: 4,
+      submissionUrlCount: 3,
+      readinessScore: 78,
+      latestOpportunityAt: "2026-07-22T11:15:00.000Z"
     }
   ]
 };
@@ -206,6 +220,14 @@ test("sources explain western europe coverage", async ({ page }) => {
   await page.getByRole("link", { name: "Sources" }).click();
 
   await expect(page).toHaveURL(/#sources$/);
+  await expect(page.getByText("Average readiness")).toBeVisible();
+  await expect(page.getByText("86/100")).toBeVisible();
+  await expect(
+    page.getByRole("columnheader", { name: "Ready to preview" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("columnheader", { name: "Submission links" })
+  ).toBeVisible();
   await expect(page.getByText("TED", { exact: true })).toBeVisible();
   await expect(page.getByText("Active fetcher")).toBeVisible();
   await expect(page.getByText("Germany e-Vergabe / service.bund")).toBeVisible();
