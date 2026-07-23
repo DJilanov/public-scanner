@@ -113,6 +113,10 @@ function buildRequiredDocuments(opportunity: NormalizedOpportunityWithScore): st
     documents.add("EU Funding & Tenders portal registration and eSubmission mandate.");
   }
 
+  if (opportunity.documentUrls && opportunity.documentUrls.length > 0) {
+    documents.add("Archived official tender attachment bundle from the buyer portal.");
+  }
+
   return [...documents];
 }
 
@@ -198,6 +202,15 @@ function buildRiskSignals(
   if (opportunity.source === "sedia") {
     risks.add(
       "SEDIA list metadata is enriched but official tender documents still need manual review."
+    );
+  }
+
+  if (
+    opportunity.source === "ted" &&
+    (!opportunity.documentUrls || opportunity.documentUrls.length === 0)
+  ) {
+    risks.add(
+      "TED notice has no detected buyer attachment URL; open the notice manually."
     );
   }
 

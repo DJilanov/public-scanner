@@ -510,6 +510,7 @@ const TRANSLATIONS = {
     packageItems: "Package items",
     packageAttention: "Needs attention",
     sourceDocuments: "Source documents",
+    openSourceDocument: "Open",
     changeTimeline: "Change timeline",
     extractedClauses: "Extracted clauses",
     clauses: "Clauses",
@@ -886,6 +887,7 @@ const TRANSLATIONS = {
     packageItems: "Елементи в пакета",
     packageAttention: "Изискват внимание",
     sourceDocuments: "Източници",
+    openSourceDocument: "Отвори",
     changeTimeline: "Хронология на промените",
     extractedClauses: "Извлечени клаузи",
     clauses: "Клаузи",
@@ -1287,6 +1289,7 @@ const DOCUMENT_KIND_LABELS: Record<Locale, Record<TenderDocumentKind, string>> =
     notice: "Notice",
     metadata: "Metadata",
     "attachment-bundle": "Attachments",
+    "submission-portal": "Submission",
     requirement: "Requirement",
     certification: "Certification",
     lot: "Lot",
@@ -1297,6 +1300,7 @@ const DOCUMENT_KIND_LABELS: Record<Locale, Record<TenderDocumentKind, string>> =
     notice: "Обявление",
     metadata: "Метаданни",
     "attachment-bundle": "Прикачени файлове",
+    "submission-portal": "Подаване",
     requirement: "Изискване",
     certification: "Сертификат",
     lot: "Позиция",
@@ -1362,6 +1366,8 @@ const GENERATED_TEXT_BG: Record<string, string> = {
     "Хардуерна доставка: провери оторизацията от производителя и гаранционните условия.",
   "Support scope: confirm SLA, response times, and coverage hours.":
     "Обхват на поддръжката: потвърди SLA, времена за реакция и часови диапазон на обслужване.",
+  "SEDIA tender: verify eSubmission access and EU portal role setup.":
+    "SEDIA търг: провери достъпа до eSubmission и ролите в EU портала.",
   "Administrative declarations and bidder identification.":
     "Административни декларации и идентификация на участника.",
   "Technical proposal mapped to every requirement.":
@@ -1376,6 +1382,10 @@ const GENERATED_TEXT_BG: Record<string, string> = {
     "Технически спецификации от производителя, гаранционна декларация и график за доставка.",
   "Team CVs, delivery methodology, implementation plan, and acceptance plan.":
     "CV-та на екипа, методология за изпълнение, план за внедряване и план за приемане.",
+  "EU Funding & Tenders portal registration and eSubmission mandate.":
+    "Регистрация в EU Funding & Tenders портала и мандат за eSubmission.",
+  "Archived official tender attachment bundle from the buyer portal.":
+    "Архивиран официален пакет с тръжни документи от портала на възложителя.",
   "ISO 27001 or equivalent security controls may be requested.":
     "Може да се изисква ISO 27001 или еквивалентни мерки за информационна сигурност.",
   "ISO 9001 or equivalent quality management evidence may be requested.":
@@ -1389,6 +1399,10 @@ const GENERATED_TEXT_BG: Record<string, string> = {
   "Deadline has passed.": "Крайният срок е изтекъл.",
   "Estimated value is missing; commercial fit needs manual review.":
     "Прогнозната стойност липсва; търговското съвпадение изисква ръчен преглед.",
+  "SEDIA list metadata is enriched but official tender documents still need manual review.":
+    "SEDIA метаданните са обогатени, но официалните тръжни документи все още изискват ръчен преглед.",
+  "TED notice has no detected buyer attachment URL; open the notice manually.":
+    "TED обявлението няма открит линк към документи от възложителя; отвори обявлението ръчно.",
   "Profile score suggests partner capacity may be needed.":
     "Оценката подсказва, че може да е нужен партньорски капацитет.",
   "Low fit score; apply only if strategic value justifies the effort.":
@@ -5681,9 +5695,21 @@ function PackageListBlock({ emptyLabel, items, locale, title }: PackageListBlock
                   {formatPackageItemDescription(item.description, locale)}
                 </span>
               </div>
-              <span className={getDocumentPackageStatusClass(item.status)}>
-                {DOCUMENT_PACKAGE_STATUS_LABELS[locale][item.status]}
-              </span>
+              <div className="package-item-actions">
+                {item.sourceUrl ? (
+                  <a
+                    className="text-link"
+                    href={item.sourceUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {t(locale, "openSourceDocument")}
+                  </a>
+                ) : null}
+                <span className={getDocumentPackageStatusClass(item.status)}>
+                  {DOCUMENT_PACKAGE_STATUS_LABELS[locale][item.status]}
+                </span>
+              </div>
             </div>
           ))}
         </div>
@@ -7543,6 +7569,7 @@ function formatPackageItemTitle(item: TenderDocumentPackageItem, locale: Locale)
     "Official notice": "Официално обявление",
     "Structured metadata snapshot": "Структуриран преглед на метаданните",
     "Official attachment bundle": "Официален пакет с прикачени файлове",
+    "Electronic submission portal": "Портал за електронно подаване",
     Lot: "Обособена позиция",
     "Contract amendment": "Анекс към договор"
   };
@@ -7566,6 +7593,10 @@ function formatPackageItemDescription(value: string | undefined, locale: Locale)
       "Нормализирани данни за възложител, CPV, стойност, срок, оценка и източник.",
     "Download and archive the official tender attachments before final submission.":
       "Изтегли и архивирай официалните прикачени файлове преди финално подаване.",
+    "Official tender attachment link detected from the source notice.":
+      "Открит е линк към официалните тръжни документи от обявлението.",
+    "Electronic submission portal detected from the source notice.":
+      "Открит е портал за електронно подаване от обявлението.",
     "Required bid package document detected by document intelligence.":
       "Необходим документ за пакета, открит от анализа на документи.",
     "Certification, authorization, or equivalent evidence to verify.":

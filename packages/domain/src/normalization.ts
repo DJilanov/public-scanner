@@ -17,6 +17,36 @@ import type {
   ProcurementSource
 } from "./types.js";
 
+const PREFERRED_LANGUAGE_KEYS = [
+  "eng",
+  "en",
+  "bul",
+  "bg",
+  "deu",
+  "fra",
+  "ron",
+  "ell",
+  "hrv",
+  "slv",
+  "spa",
+  "ita",
+  "nld",
+  "por",
+  "swe",
+  "fin",
+  "dan",
+  "ces",
+  "pol",
+  "hun",
+  "lav",
+  "lit",
+  "mlt",
+  "slk",
+  "gle",
+  "est"
+] as const;
+const PREFERRED_LANGUAGE_KEY_SET = new Set<string>(PREFERRED_LANGUAGE_KEYS);
+
 export interface NormalizedOpportunityWithScore extends NormalizedOpportunity {
   match: OpportunityScore;
   profileScores: ProfileFitScore[];
@@ -114,8 +144,17 @@ export function normalizeTedNoticeRecord(
   }
 
   const publicationNumber = readFirstField(record, "publication-number");
-  const title = readFirstField(record, "notice-title");
-  const buyerName = readFirstField(record, "buyer-name");
+  const title = cleanText(
+    readFirstPreferredField(record, [
+      "title-proc",
+      "title-lot",
+      "title-glo",
+      "contract-title",
+      "announcement-title",
+      "notice-title"
+    ])
+  );
+  const buyerName = cleanText(readFirstField(record, "buyer-name"));
 
   if (!publicationNumber || !title || !buyerName) {
     return undefined;
@@ -135,6 +174,14 @@ export function normalizeTedNoticeRecord(
   const tedUrl = readTedUrl(record, publicationNumber);
   const buyerCountryCode = readFirstField(record, "buyer-country");
   const procedureType = readFirstField(record, "procedure-type");
+  const description = buildTedDescription(record);
+  const documentUrls = readUrlFields(record, [
+    "document-url-lot",
+    "document-url-part",
+    "document-restricted-url-lot",
+    "document-restricted-url-part"
+  ]);
+  const submissionUrls = readUrlFields(record, ["submission-url-lot"]);
   const deduplicationKey = buildOpportunityDeduplicationKey({
     source: "ted",
     publicationNumber
@@ -154,6 +201,9 @@ export function normalizeTedNoticeRecord(
     cpvCodes,
     sourceUrl: tedUrl,
     tedUrl,
+    ...(description ? { description } : {}),
+    ...(documentUrls.length > 0 ? { documentUrls } : {}),
+    ...(submissionUrls.length > 0 ? { submissionUrls } : {}),
     ...(buyerCountryCode ? { buyerCountryCode } : {}),
     ...(cpvCodes[0] ? { mainCpvCode: cpvCodes[0] } : {}),
     ...(estimatedAmount !== undefined && currency
@@ -207,12 +257,10 @@ export function normalizeSediaResultRecord(
   );
   const language =
     readFirstNestedField(record, metadata, "language") ?? readString(record.language);
-  const description = normalizeWhitespace(
-    stripHtml(
-      readFirstNestedField(record, metadata, "description") ??
-        readString(record.summary) ??
-        readString(record.content)
-    )
+  const description = cleanText(
+    readFirstNestedField(record, metadata, "description") ??
+      readString(record.summary) ??
+      readString(record.content)
   );
   const procedureType = buildSediaProcedureSummary(record, metadata);
   const europeanProgram = buildSediaProgrammeSummary(record, metadata);
@@ -523,9 +571,32 @@ function readFirstField(
   return readFieldStrings(record, key)[0];
 }
 
+function readFirstPreferredField(
+  record: Record<string, unknown>,
+  keys: readonly string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = readFirstField(record, key);
+    if (value) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
 function readFieldStrings(record: Record<string, unknown>, key: string): string[] {
   const value = record[key];
   const values = flattenFieldValues(value);
+  return [...new Set(values.map((entry) => entry.trim()).filter(Boolean))];
+}
+
+function readPreferredFieldStrings(
+  record: Record<string, unknown>,
+  key: string
+): string[] {
+  const value = record[key];
+  const values = flattenPreferredFieldValues(value);
   return [...new Set(values.map((entry) => entry.trim()).filter(Boolean))];
 }
 
@@ -543,10 +614,85 @@ function flattenFieldValues(value: unknown): string[] {
   }
 
   if (isRecord(value)) {
-    return Object.values(value).flatMap((entry) => flattenFieldValues(entry));
+    const preferredEntries = PREFERRED_LANGUAGE_KEYS.flatMap((key) =>
+      key in value ? flattenFieldValues(value[key]) : []
+    );
+    const fallbackEntries = Object.entries(value).flatMap(([key, entry]) =>
+      PREFERRED_LANGUAGE_KEY_SET.has(key) ? [] : flattenFieldValues(entry)
+    );
+    return [...preferredEntries, ...fallbackEntries];
   }
 
   return [];
+}
+
+function flattenPreferredFieldValues(value: unknown): string[] {
+  if (!isRecord(value)) {
+    return flattenFieldValues(value);
+  }
+
+  for (const key of PREFERRED_LANGUAGE_KEYS) {
+    if (key in value) {
+      const preferredValues = flattenFieldValues(value[key]);
+      if (preferredValues.length > 0) {
+        return preferredValues;
+      }
+    }
+  }
+
+  return Object.values(value).flatMap((entry) => flattenFieldValues(entry));
+}
+
+function buildTedDescription(record: Record<string, unknown>): string | undefined {
+  const parts = [
+    ...readTedDescriptionParts(record, [
+      "description-proc",
+      "description-lot",
+      "description-glo"
+    ]),
+    ...readTedDescriptionParts(record, [
+      "additional-info-proc",
+      "additional-information-lot",
+      "additional-info-glo"
+    ]).map((value) => `Additional information: ${value}`),
+    ...readTedDescriptionParts(record, ["selection-criterion-description-lot"]).map(
+      (value) => `Selection criteria: ${value}`
+    ),
+    ...readTedDescriptionParts(record, ["contract-conditions-description-lot"]).map(
+      (value) => `Contract conditions: ${value}`
+    ),
+    ...readTedDescriptionParts(record, ["guarantee-required-description-lot"]).map(
+      (value) => `Guarantee requirements: ${value}`
+    )
+  ];
+
+  return truncateText(dedupeStrings(parts).join(" "), 6000);
+}
+
+function readTedDescriptionParts(
+  record: Record<string, unknown>,
+  keys: readonly string[]
+): string[] {
+  return keys.flatMap((key) =>
+    readPreferredFieldStrings(record, key).flatMap((value) => {
+      const cleaned = cleanText(value);
+      return cleaned ? [cleaned] : [];
+    })
+  );
+}
+
+function readUrlFields(
+  record: Record<string, unknown>,
+  keys: readonly string[]
+): string[] {
+  const urls = keys.flatMap((key) =>
+    readFieldStrings(record, key).flatMap((value) => {
+      const cleaned = decodeHtmlEntities(value)?.trim();
+      return cleaned && /^https?:\/\//i.test(cleaned) ? [cleaned] : [];
+    })
+  );
+
+  return dedupeStrings(urls);
 }
 
 function readTedUrl(record: Record<string, unknown>, publicationNumber: string): string {
@@ -619,12 +765,52 @@ function stripHtml(value: string | undefined): string | undefined {
   return value?.replace(/<[^>]*>/g, " ");
 }
 
+function cleanText(value: string | undefined): string | undefined {
+  return normalizeWhitespace(stripHtml(decodeHtmlEntities(value)));
+}
+
+function decodeHtmlEntities(value: string | undefined): string | undefined {
+  return value
+    ?.replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_match, hex: string) =>
+      decodeCodePoint(Number.parseInt(hex, 16))
+    )
+    .replace(/&#(\d+);/g, (_match, code: string) =>
+      decodeCodePoint(Number.parseInt(code, 10))
+    );
+}
+
+function decodeCodePoint(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+
+  try {
+    return String.fromCodePoint(value);
+  } catch {
+    return "";
+  }
+}
+
 function normalizeWhitespace(value: string | undefined): string | undefined {
   const normalized = value
     ?.replace(/\s+/g, " ")
     .replace(/\s+([,.;:!?])/g, "$1")
     .trim();
   return normalized ? normalized : undefined;
+}
+
+function truncateText(value: string | undefined, maxLength: number): string | undefined {
+  if (!value || value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
 function extractTedPublicationNumber(value: string): string | undefined {

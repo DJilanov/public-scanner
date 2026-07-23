@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { Fetcher } from "./http.js";
-import { buildBulgarianSoftwareTedQuery, buildTedIctQuery, TedClient } from "./ted.js";
+import {
+  buildBulgarianSoftwareTedQuery,
+  buildTedIctQuery,
+  TedClient,
+  TED_SOFTWARE_FIELDS
+} from "./ted.js";
 
 describe("TedClient", () => {
   it("builds a strict Bulgarian software query", () => {
@@ -60,5 +65,17 @@ describe("TedClient", () => {
       totalNoticeCount: 1,
       notices: [{ "publication-number": "510019-2026" }]
     });
+  });
+
+  it("requests text and source-document fields used by the document package", () => {
+    expect(TED_SOFTWARE_FIELDS).toEqual(
+      expect.arrayContaining([
+        "description-proc",
+        "description-lot",
+        "selection-criterion-description-lot",
+        "document-url-lot",
+        "submission-url-lot"
+      ])
+    );
   });
 });

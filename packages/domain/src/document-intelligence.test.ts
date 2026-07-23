@@ -98,4 +98,42 @@ describe("buildDocumentIntelligence", () => {
       ])
     );
   });
+
+  it("distinguishes TED notices with detected attachment URLs from metadata-only notices", () => {
+    const baseOpportunity: NormalizedOpportunity = {
+      source: "ted",
+      externalId: "510019-2026",
+      deduplicationKey: "ted:510019-2026",
+      title: "Software support services",
+      buyerName: "EU buyer",
+      status: "open",
+      cpvCodes: ["72230000"],
+      sourceUrl: "https://ted.europa.eu/en/notice/510019-2026/html",
+      submissionDeadline: "2026-08-15T17:00:00.000Z"
+    };
+
+    const withDocuments = buildDocumentIntelligence(
+      scoreNormalizedOpportunity(
+        {
+          ...baseOpportunity,
+          documentUrls: ["https://buyer.example.test/documents"]
+        },
+        { now: new Date("2026-07-23T00:00:00.000Z") }
+      ),
+      { now: new Date("2026-07-23T00:00:00.000Z") }
+    );
+    const withoutDocuments = buildDocumentIntelligence(
+      scoreNormalizedOpportunity(baseOpportunity, {
+        now: new Date("2026-07-23T00:00:00.000Z")
+      }),
+      { now: new Date("2026-07-23T00:00:00.000Z") }
+    );
+
+    expect(withDocuments.requiredDocuments).toContain(
+      "Archived official tender attachment bundle from the buyer portal."
+    );
+    expect(withoutDocuments.risks).toContain(
+      "TED notice has no detected buyer attachment URL; open the notice manually."
+    );
+  });
 });

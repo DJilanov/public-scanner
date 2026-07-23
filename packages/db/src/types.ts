@@ -219,6 +219,8 @@ export interface OpportunityRow extends QueryResultRow {
   is_eu_funded: boolean | null;
   european_program: string | null;
   source_url: string;
+  document_urls: string[];
+  submission_urls: string[];
   ted_url: string | null;
   score: number | null;
   reasons: MatchReason[] | null;

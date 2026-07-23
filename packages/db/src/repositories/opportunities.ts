@@ -819,13 +819,16 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
           is_eu_funded,
           european_program,
           source_url,
+          document_urls,
+          submission_urls,
           ted_url,
           raw_document_id
         )
         VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
           $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-          $21, $22, $23, $24, $25, $26, $27, $28, $29, $30
+          $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
+          $31, $32
         )
         ON CONFLICT (source, external_id) DO UPDATE SET
           source_id = excluded.source_id,
@@ -854,6 +857,8 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
           is_eu_funded = excluded.is_eu_funded,
           european_program = excluded.european_program,
           source_url = excluded.source_url,
+          document_urls = excluded.document_urls,
+          submission_urls = excluded.submission_urls,
           ted_url = excluded.ted_url,
           raw_document_id = excluded.raw_document_id,
           updated_at = now()
@@ -888,6 +893,8 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
         opportunity.isEuFunded ?? null,
         opportunity.europeanProgram ?? null,
         opportunity.sourceUrl,
+        opportunity.documentUrls ?? [],
+        opportunity.submissionUrls ?? [],
         opportunity.tedUrl ?? null,
         rawDocumentId ?? null
       ]
@@ -959,6 +966,8 @@ function mapOpportunityRow(row: OpportunityRow): Opportunity {
     status: row.status,
     cpvCodes: row.cpv_codes,
     sourceUrl: row.source_url,
+    ...(row.document_urls.length > 0 ? { documentUrls: row.document_urls } : {}),
+    ...(row.submission_urls.length > 0 ? { submissionUrls: row.submission_urls } : {}),
     ...(row.publication_date
       ? { publicationDate: normalizeDbDate(row.publication_date) }
       : {}),

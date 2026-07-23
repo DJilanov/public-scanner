@@ -142,8 +142,26 @@ describe("normalization", () => {
       {
         "publication-number": ["510019-2026"],
         "notice-title": {
-          bul: ["Услуги, свързани със софтуерни продукти"]
+          bul: ["Услуги, свързани със софтуерни продукти"],
+          eng: ["Software services"]
         },
+        "title-proc": {
+          bul: "Разработка на информационна система",
+          eng: "Information system development"
+        },
+        "description-proc": {
+          bul: "Изработка на портал",
+          eng: "Development of a web portal &amp; support services."
+        },
+        "selection-criterion-description-lot": {
+          eng: ["At least two software reference projects from the last three years."]
+        },
+        "document-url-lot": [
+          "https://buyer.example.test/tenders/510019/documents?x=1&amp;y=2"
+        ],
+        "submission-url-lot": [
+          "https://buyer.example.test/tenders/510019/submit?x=1&amp;y=2"
+        ],
         "buyer-name": ["ОБЩИНА БУРГАС"],
         "buyer-country": ["BGR"],
         "classification-cpv": ["72700000", "72230000"],
@@ -160,10 +178,15 @@ describe("normalization", () => {
       source: "ted",
       externalId: "510019-2026",
       deduplicationKey: "ted:510019-2026",
+      title: "Information system development",
+      description:
+        "Development of a web portal & support services. Selection criteria: At least two software reference projects from the last three years.",
       publicationNumber: "510019-2026",
       buyerCountryCode: "BGR",
       status: "open",
       cpvCodes: ["72700000", "72230000"],
+      documentUrls: ["https://buyer.example.test/tenders/510019/documents?x=1&y=2"],
+      submissionUrls: ["https://buyer.example.test/tenders/510019/submit?x=1&y=2"],
       tedUrl: "https://ted.europa.eu/bg/notice/510019-2026/html"
     });
   });

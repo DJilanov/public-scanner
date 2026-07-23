@@ -260,6 +260,9 @@ describe("worker ingestion", () => {
             {
               "publication-number": ["510019-2026"],
               "notice-title": ["Software development"],
+              "description-proc": ["Software development and support services."],
+              "document-url-lot": ["https://buyer.example.test/documents"],
+              "submission-url-lot": ["https://buyer.example.test/submit"],
               "buyer-name": ["EU buyer"],
               "classification-cpv": ["72230000"],
               "deadline-receipt-tender-date-lot": ["2026-08-10+02:00"],
@@ -285,7 +288,10 @@ describe("worker ingestion", () => {
     });
     expect(store.opportunities[0]).toMatchObject({
       source: "ted",
-      externalId: "510019-2026"
+      externalId: "510019-2026",
+      description: "Software development and support services.",
+      documentUrls: ["https://buyer.example.test/documents"],
+      submissionUrls: ["https://buyer.example.test/submit"]
     });
   });
 

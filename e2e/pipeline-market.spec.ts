@@ -17,6 +17,15 @@ const documentIntelligence = {
   risks: []
 };
 
+interface MockDocumentPackageItem {
+  id: string;
+  title: string;
+  kind: string;
+  status: string;
+  description: string;
+  sourceUrl: string;
+}
+
 const dashboard = {
   pipeline: [
     {
@@ -205,6 +214,30 @@ test("sources explain western europe coverage", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("preview exposes detected TED document and submission links", async ({ page }) => {
+  await page.goto("/#pipeline");
+
+  await expect(page.getByRole("heading", { name: "Application Pipeline" })).toBeVisible();
+  await page.getByRole("button", { name: "Romania data center refresh" }).click();
+
+  await expect(page.getByText("Tender preview")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Romania data center refresh" })
+  ).toBeVisible();
+  await expect(
+    page.getByText("Official attachment bundle", { exact: true })
+  ).toBeVisible();
+  await expect(
+    page.getByText("Electronic submission portal", { exact: true })
+  ).toBeVisible();
+  await expect(
+    page.locator('.package-item a[href="https://buyer.example.test/ro/documents"]')
+  ).toBeVisible();
+  await expect(
+    page.locator('.package-item a[href="https://buyer.example.test/ro/submit"]')
+  ).toBeVisible();
+});
+
 async function mockApi(page: Page): Promise<void> {
   await page.route(/\/api\/auth\/session$/, async (route) => {
     await route.fulfill({
@@ -252,8 +285,68 @@ async function mockApi(page: Page): Promise<void> {
   });
 
   await page.route(/\/api\/opportunities\?/, async (route) => {
-    await route.fulfill({ json: { data: [] } });
+    await route.fulfill({
+      json: {
+        data: dashboard.pipeline
+          .filter((item) => item.opportunity.sourceId !== "worldbank")
+          .map((item) => item.opportunity)
+      }
+    });
   });
+
+  await page.route(
+    /\/api\/opportunities\/(bg-software-1|ro-hardware-1)$/,
+    async (route) => {
+      const opportunityId = route.request().url().split("/").at(-1);
+      const pipelineItem =
+        dashboard.pipeline.find((item) => item.opportunity.id === opportunityId) ??
+        dashboard.pipeline[0];
+      const isRomaniaHardware = pipelineItem.opportunity.id === "ro-hardware-1";
+      await route.fulfill({
+        json: {
+          data: {
+            opportunity: {
+              ...pipelineItem.opportunity,
+              description: isRomaniaHardware
+                ? "Hardware refresh with buyer portal documents."
+                : "Software platform implementation.",
+              ...(isRomaniaHardware
+                ? {
+                    documentUrls: ["https://buyer.example.test/ro/documents"],
+                    submissionUrls: ["https://buyer.example.test/ro/submit"]
+                  }
+                : {}),
+              match: {
+                score: isRomaniaHardware ? 81 : 88,
+                reasons: []
+              }
+            },
+            lots: [],
+            contracts: [],
+            amendments: [],
+            savedState: pipelineItem.savedState,
+            documentIntelligence,
+            documentPackage: {
+              items: buildMockDocumentPackageItems(isRomaniaHardware),
+              timeline: [],
+              clauses: [],
+              summary: {
+                itemCount: isRomaniaHardware ? 3 : 1,
+                availableCount: isRomaniaHardware ? 3 : 1,
+                needsAttentionCount: 0,
+                timelineCount: 0,
+                clauseCount: 0,
+                riskClauseCount: 0
+              },
+              coveragePercent: 100,
+              updatedAt: "2026-07-23T00:00:00.000Z"
+            },
+            competitorInsights: []
+          }
+        }
+      });
+    }
+  );
 
   await page.route(/\/api\/dashboard(\?|$)/, async (route) => {
     await route.fulfill({ json: { data: dashboard } });
@@ -273,4 +366,45 @@ async function mockApi(page: Page): Promise<void> {
   await page.route(/\/api\/alerts\/rules$/, async (route) => {
     await route.fulfill({ json: { data: [] } });
   });
+}
+
+function buildMockDocumentPackageItems(
+  includeExternalLinks: boolean
+): MockDocumentPackageItem[] {
+  const items = [
+    {
+      id: "official-notice",
+      title: "Official notice",
+      kind: "notice",
+      status: "available",
+      description: "Primary tender notice from the public procurement source.",
+      sourceUrl: includeExternalLinks
+        ? "https://example.test/ro"
+        : "https://example.test/bg"
+    }
+  ];
+
+  if (!includeExternalLinks) {
+    return items;
+  }
+
+  return [
+    ...items,
+    {
+      id: "official-attachments",
+      title: "Official attachment bundle",
+      kind: "attachment-bundle",
+      status: "available",
+      description: "Official tender attachment link detected from the source notice.",
+      sourceUrl: "https://buyer.example.test/ro/documents"
+    },
+    {
+      id: "submission-portal",
+      title: "Electronic submission portal",
+      kind: "submission-portal",
+      status: "available",
+      description: "Electronic submission portal detected from the source notice.",
+      sourceUrl: "https://buyer.example.test/ro/submit"
+    }
+  ];
 }

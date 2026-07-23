@@ -363,12 +363,29 @@ function buildPackageItems(
       id: "official-attachments",
       title: "Official attachment bundle",
       kind: "attachment-bundle",
-      status: deriveAttachmentStatus(input.documentIntelligence),
+      status:
+        input.opportunity.documentUrls && input.opportunity.documentUrls.length > 0
+          ? "available"
+          : deriveAttachmentStatus(input.documentIntelligence),
       description:
-        "Download and archive the official tender attachments before final submission.",
-      sourceUrl: input.opportunity.sourceUrl
+        input.opportunity.documentUrls && input.opportunity.documentUrls.length > 0
+          ? "Official tender attachment link detected from the source notice."
+          : "Download and archive the official tender attachments before final submission.",
+      sourceUrl: input.opportunity.documentUrls?.[0] ?? input.opportunity.sourceUrl
     }
   ];
+
+  const submissionUrl = input.opportunity.submissionUrls?.[0];
+  if (submissionUrl) {
+    items.push({
+      id: "submission-portal",
+      title: "Electronic submission portal",
+      kind: "submission-portal",
+      status: "available",
+      description: "Electronic submission portal detected from the source notice.",
+      sourceUrl: submissionUrl
+    });
+  }
 
   for (const [index, document] of (
     input.documentIntelligence?.requiredDocuments ?? []

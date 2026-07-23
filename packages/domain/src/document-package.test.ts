@@ -89,6 +89,34 @@ describe("buildTenderDocumentPackage", () => {
       ])
     );
   });
+
+  it("marks detected source document and submission links as available", () => {
+    const documentPackage = buildTenderDocumentPackage({
+      opportunity: {
+        ...opportunity,
+        documentUrls: ["https://buyer.example.test/tender/documents"],
+        submissionUrls: ["https://buyer.example.test/tender/submit"]
+      },
+      documentIntelligence,
+      now: new Date("2026-07-23T00:00:00.000Z")
+    });
+
+    expect(documentPackage.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "official-attachments",
+          status: "available",
+          sourceUrl: "https://buyer.example.test/tender/documents"
+        }),
+        expect.objectContaining({
+          id: "submission-portal",
+          kind: "submission-portal",
+          status: "available",
+          sourceUrl: "https://buyer.example.test/tender/submit"
+        })
+      ])
+    );
+  });
 });
 
 describe("buildTenderChangeTimeline", () => {

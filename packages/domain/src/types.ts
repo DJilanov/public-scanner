@@ -140,6 +140,8 @@ export interface Opportunity {
   status: OpportunityStatus;
   cpvCodes: string[];
   sourceUrl: string;
+  documentUrls?: string[];
+  submissionUrls?: string[];
   deduplicationKey?: string;
   publicationDate?: string;
   submissionDeadline?: string;
@@ -164,6 +166,8 @@ export interface NormalizedOpportunity {
   status: OpportunityStatus;
   cpvCodes: string[];
   sourceUrl: string;
+  documentUrls?: string[];
+  submissionUrls?: string[];
   tenderId?: string;
   uniqueProcurementNumber?: string;
   publicationNumber?: string;
@@ -278,6 +282,7 @@ export type TenderDocumentKind =
   | "notice"
   | "metadata"
   | "attachment-bundle"
+  | "submission-portal"
   | "requirement"
   | "certification"
   | "lot"
