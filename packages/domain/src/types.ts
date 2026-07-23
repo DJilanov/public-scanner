@@ -203,6 +203,91 @@ export interface DocumentIntelligence {
   extractedAt?: string;
 }
 
+export type TenderDocumentKind =
+  | "notice"
+  | "metadata"
+  | "attachment-bundle"
+  | "requirement"
+  | "certification"
+  | "lot"
+  | "contract"
+  | "amendment";
+
+export type TenderDocumentStatus =
+  "available" | "extracted" | "needs-download" | "needs-review" | "failed";
+
+export interface TenderDocumentPackageItem {
+  id: string;
+  title: string;
+  kind: TenderDocumentKind;
+  status: TenderDocumentStatus;
+  description?: string;
+  sourceUrl?: string;
+  lastSeenAt?: string;
+}
+
+export type TenderChangeType =
+  | "published"
+  | "deadline"
+  | "documents-extracted"
+  | "lot"
+  | "contract-award"
+  | "amendment"
+  | "source-snapshot";
+
+export interface TenderChangeTimelineItem {
+  id: string;
+  type: TenderChangeType;
+  title: string;
+  summary?: string;
+  occurredAt?: string;
+  sourceUrl?: string;
+}
+
+export type ExtractedClauseType =
+  | "deadline"
+  | "budget"
+  | "eligibility"
+  | "document"
+  | "certification"
+  | "warranty"
+  | "delivery"
+  | "payment"
+  | "risk"
+  | "support"
+  | "lot"
+  | "award";
+
+export type TenderClauseSeverity = "info" | "watch" | "risk";
+
+export interface ExtractedTenderClause {
+  id: string;
+  type: ExtractedClauseType;
+  title: string;
+  text: string;
+  severity: TenderClauseSeverity;
+  confidence: number;
+  source?: string;
+}
+
+export interface TenderDocumentPackageSummary {
+  itemCount: number;
+  availableCount: number;
+  needsAttentionCount: number;
+  timelineCount: number;
+  clauseCount: number;
+  riskClauseCount: number;
+}
+
+export interface TenderDocumentPackage {
+  items: TenderDocumentPackageItem[];
+  timeline: TenderChangeTimelineItem[];
+  clauses: ExtractedTenderClause[];
+  summary: TenderDocumentPackageSummary;
+  coveragePercent: number;
+  updatedAt: string;
+}
+
 export interface CompetitorInsight {
   supplierName: string;
   winsCount: number;
@@ -217,6 +302,7 @@ export interface OpportunityDetail {
   amendments: ContractAmendmentSummary[];
   savedState?: SavedOpportunityState;
   documentIntelligence?: DocumentIntelligence;
+  documentPackage?: TenderDocumentPackage;
   competitorInsights: CompetitorInsight[];
 }
 
@@ -229,6 +315,7 @@ export interface PipelineDashboardItem {
 export interface DocumentReviewItem {
   opportunity: Opportunity;
   documentIntelligence: DocumentIntelligence;
+  documentPackage?: TenderDocumentPackage;
   savedState?: SavedOpportunityState;
 }
 

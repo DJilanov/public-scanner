@@ -1,3 +1,4 @@
+import { buildTenderDocumentPackage } from "@public-scanner/domain";
 import type {
   BuyerDashboardItem,
   ContractAmendmentSummary,
@@ -361,16 +362,27 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
 
     const savedRow = savedResult.rows[0];
     const documentIntelligenceRow = documentIntelligenceResult.rows[0];
+    const lots = lotsResult.rows.map(mapOpportunityLotRow);
+    const contracts = contractsResult.rows.map(mapContractSummaryRow);
+    const amendments = amendmentsResult.rows.map(mapContractAmendmentRow);
+    const documentIntelligence = documentIntelligenceRow
+      ? mapDocumentIntelligenceRow(documentIntelligenceRow)
+      : emptyDocumentIntelligence();
 
     return {
       opportunity,
-      lots: lotsResult.rows.map(mapOpportunityLotRow),
-      contracts: contractsResult.rows.map(mapContractSummaryRow),
-      amendments: amendmentsResult.rows.map(mapContractAmendmentRow),
+      lots,
+      contracts,
+      amendments,
       ...(savedRow ? { savedState: mapSavedOpportunityRow(savedRow) } : {}),
-      documentIntelligence: documentIntelligenceRow
-        ? mapDocumentIntelligenceRow(documentIntelligenceRow)
-        : emptyDocumentIntelligence(),
+      documentIntelligence,
+      documentPackage: buildTenderDocumentPackage({
+        opportunity,
+        lots,
+        contracts,
+        amendments,
+        documentIntelligence
+      }),
       competitorInsights: competitorInsightsResult.rows.map(mapCompetitorInsightRow)
     };
   }
@@ -874,11 +886,17 @@ function mapPipelineDashboardRow(row: PipelineDashboardRow): PipelineDashboardIt
 function mapDocumentReviewDashboardRow(
   row: DocumentReviewDashboardRow
 ): DocumentReviewItem {
+  const opportunity = mapOpportunityRow(row);
+  const documentIntelligence = mapDashboardDocumentIntelligence(row);
   const savedState = mapOptionalSavedOpportunityRow(row);
 
   return {
-    opportunity: mapOpportunityRow(row),
-    documentIntelligence: mapDashboardDocumentIntelligence(row),
+    opportunity,
+    documentIntelligence,
+    documentPackage: buildTenderDocumentPackage({
+      opportunity,
+      documentIntelligence
+    }),
     ...(savedState ? { savedState } : {})
   };
 }

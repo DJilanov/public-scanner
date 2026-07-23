@@ -1360,6 +1360,119 @@ meter {
   background: var(--surface-raised);
 }
 
+.document-package-panel {
+  gap: 12px;
+}
+
+.package-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.package-stats > div {
+  display: grid;
+  gap: 3px;
+  min-height: 68px;
+  padding: 10px;
+  background: var(--surface-raised);
+}
+
+.package-stats strong {
+  color: var(--text);
+  font-size: 1.05rem;
+}
+
+.package-stats span,
+.package-item span,
+.timeline-list span,
+.clause-item span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.package-block {
+  display: grid;
+  gap: 8px;
+}
+
+.package-block > strong {
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.package-item-list,
+.clause-list {
+  display: grid;
+  gap: 8px;
+}
+
+.package-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  padding: 10px;
+  background: var(--surface-raised);
+}
+
+.package-item > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.timeline-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-list li {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 9px;
+  padding: 10px;
+  background: var(--surface-raised);
+}
+
+.timeline-list time {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.timeline-list li > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.clause-item {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  background: var(--surface-raised);
+}
+
+.clause-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.clause-item p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+  line-height: 1.42;
+}
+
 @media (max-width: 1120px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1461,7 +1574,13 @@ meter {
   .economics-form,
   .decision-metrics,
   .economics-metrics,
+  .package-stats,
   .save-view-form {
+    grid-template-columns: 1fr;
+  }
+
+  .package-item,
+  .timeline-list li {
     grid-template-columns: 1fr;
   }
 

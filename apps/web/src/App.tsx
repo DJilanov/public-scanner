@@ -11,6 +11,7 @@ import {
 import {
   buildApplicationPackMarkdown,
   buildBidDecision,
+  buildDocumentPackageMarkdown,
   buildDeadlineCalendarEvent,
   buildOpportunityForecasts,
   calculateBidEconomics
@@ -37,6 +38,8 @@ import type {
   EvidenceItem,
   EvidenceItemInput,
   EvidenceType,
+  ExtractedClauseType,
+  ExtractedTenderClause,
   Money,
   Opportunity,
   OpportunityDetail,
@@ -46,7 +49,13 @@ import type {
   ProfileFitScore,
   SavedOpportunityState,
   SourceHealthItem,
-  SupplierDashboardItem
+  SupplierDashboardItem,
+  TenderChangeTimelineItem,
+  TenderClauseSeverity,
+  TenderDocumentKind,
+  TenderDocumentPackage,
+  TenderDocumentPackageItem,
+  TenderDocumentStatus
 } from "@public-scanner/domain";
 
 interface ApiResponse<T> {
@@ -398,6 +407,19 @@ const TRANSLATIONS = {
     saving: "Saving",
     saveStage: "Save stage",
     documentIntelligence: "Document Intelligence",
+    documentPackage: "Document Package",
+    packageCoverage: "Package coverage",
+    packageItems: "Package items",
+    packageAttention: "Needs attention",
+    sourceDocuments: "Source documents",
+    changeTimeline: "Change timeline",
+    extractedClauses: "Extracted clauses",
+    clauses: "Clauses",
+    highRiskClauses: "Risk clauses",
+    downloadDocumentBrief: "Download brief",
+    noDocumentPackage: "No document package data yet.",
+    noTimelineItems: "No package timeline yet.",
+    noClausesDetected: "No extracted clauses yet.",
     eligibility: "Eligibility",
     requiredDocs: "Required Docs",
     certifications: "Certifications",
@@ -735,6 +757,19 @@ const TRANSLATIONS = {
     saving: "Запазване",
     saveStage: "Запази етап",
     documentIntelligence: "Анализ на документи",
+    documentPackage: "Пакет документи",
+    packageCoverage: "Покритие на пакета",
+    packageItems: "Елементи в пакета",
+    packageAttention: "Изискват внимание",
+    sourceDocuments: "Източници",
+    changeTimeline: "Хронология на промените",
+    extractedClauses: "Извлечени клаузи",
+    clauses: "Клаузи",
+    highRiskClauses: "Рискови клаузи",
+    downloadDocumentBrief: "Изтегли резюме",
+    noDocumentPackage: "Все още няма данни за пакета.",
+    noTimelineItems: "Все още няма хронология на пакета.",
+    noClausesDetected: "Все още няма извлечени клаузи.",
     eligibility: "Допустимост",
     requiredDocs: "Необходими документи",
     certifications: "Сертификати",
@@ -1074,6 +1109,93 @@ const DOCUMENT_STATUS_LABELS: Record<
     ready: "готово",
     failed: "грешка",
     "not-available": "няма данни"
+  }
+};
+
+const DOCUMENT_PACKAGE_STATUS_LABELS: Record<
+  Locale,
+  Record<TenderDocumentStatus, string>
+> = {
+  en: {
+    available: "available",
+    extracted: "extracted",
+    "needs-download": "needs download",
+    "needs-review": "needs review",
+    failed: "failed"
+  },
+  bg: {
+    available: "налично",
+    extracted: "извлечено",
+    "needs-download": "за изтегляне",
+    "needs-review": "за преглед",
+    failed: "грешка"
+  }
+};
+
+const DOCUMENT_KIND_LABELS: Record<Locale, Record<TenderDocumentKind, string>> = {
+  en: {
+    notice: "Notice",
+    metadata: "Metadata",
+    "attachment-bundle": "Attachments",
+    requirement: "Requirement",
+    certification: "Certification",
+    lot: "Lot",
+    contract: "Contract",
+    amendment: "Amendment"
+  },
+  bg: {
+    notice: "Обявление",
+    metadata: "Метаданни",
+    "attachment-bundle": "Прикачени файлове",
+    requirement: "Изискване",
+    certification: "Сертификат",
+    lot: "Позиция",
+    contract: "Договор",
+    amendment: "Анекс"
+  }
+};
+
+const CLAUSE_TYPE_LABELS: Record<Locale, Record<ExtractedClauseType, string>> = {
+  en: {
+    deadline: "Deadline",
+    budget: "Budget",
+    eligibility: "Eligibility",
+    document: "Document",
+    certification: "Certification",
+    warranty: "Warranty",
+    delivery: "Delivery",
+    payment: "Payment",
+    risk: "Risk",
+    support: "Support",
+    lot: "Lot",
+    award: "Award"
+  },
+  bg: {
+    deadline: "Срок",
+    budget: "Бюджет",
+    eligibility: "Допустимост",
+    document: "Документ",
+    certification: "Сертификат",
+    warranty: "Гаранция",
+    delivery: "Доставка",
+    payment: "Плащане",
+    risk: "Риск",
+    support: "Поддръжка",
+    lot: "Позиция",
+    award: "Възлагане"
+  }
+};
+
+const CLAUSE_SEVERITY_LABELS: Record<Locale, Record<TenderClauseSeverity, string>> = {
+  en: {
+    info: "info",
+    watch: "watch",
+    risk: "risk"
+  },
+  bg: {
+    info: "инфо",
+    watch: "наблюдение",
+    risk: "риск"
   }
 };
 
@@ -3088,7 +3210,7 @@ function OverviewPage({
             items={dashboard.documents.slice(0, 6).map((item) => ({
               id: item.opportunity.id,
               title: item.opportunity.title,
-              meta: `${formatDocumentStatus(item.documentIntelligence.status, locale)} - ${item.documentIntelligence.risks.length} ${t(locale, "risks")}`
+              meta: `${formatDocumentStatus(item.documentIntelligence.status, locale)} - ${formatPackageCoverage(item.documentPackage, locale)} - ${item.documentIntelligence.risks.length} ${t(locale, "risks")}`
             }))}
           />
         </DashboardPanel>
@@ -3287,6 +3409,14 @@ function DocumentReviewPage({
     (total, item) => total + item.documentIntelligence.risks.length,
     0
   );
+  const packageAttentionCount = items.reduce(
+    (total, item) => total + (item.documentPackage?.summary.needsAttentionCount ?? 0),
+    0
+  );
+  const clauseCount = items.reduce(
+    (total, item) => total + (item.documentPackage?.summary.clauseCount ?? 0),
+    0
+  );
 
   return (
     <section className="content" id="documents">
@@ -3303,6 +3433,11 @@ function DocumentReviewPage({
         <Metric label={t(locale, "failedDocuments")} value={String(failedCount)} />
         <Metric label={t(locale, "missingDocuments")} value={String(missingCount)} />
         <Metric label={t(locale, "documentRisks")} value={String(riskCount)} />
+        <Metric
+          label={t(locale, "packageAttention")}
+          value={String(packageAttentionCount)}
+        />
+        <Metric label={t(locale, "clauses")} value={String(clauseCount)} />
       </section>
       <div className="table-wrap">
         <table>
@@ -3312,13 +3447,15 @@ function DocumentReviewPage({
               <th scope="col">{t(locale, "opportunity")}</th>
               <th scope="col">{t(locale, "requiredCount")}</th>
               <th scope="col">{t(locale, "certificationCount")}</th>
+              <th scope="col">{t(locale, "packageCoverage")}</th>
+              <th scope="col">{t(locale, "clauses")}</th>
               <th scope="col">{t(locale, "riskCount")}</th>
               <th scope="col">{t(locale, "risks")}</th>
             </tr>
           </thead>
           <tbody>
             {items.length === 0 ? (
-              <EmptyTableRow colSpan={6} label={t(locale, "noDocumentItems")} />
+              <EmptyTableRow colSpan={8} label={t(locale, "noDocumentItems")} />
             ) : (
               items.map((item) => (
                 <tr key={item.opportunity.id}>
@@ -3337,6 +3474,8 @@ function DocumentReviewPage({
                   </td>
                   <td>{item.documentIntelligence.requiredDocuments.length}</td>
                   <td>{item.documentIntelligence.certifications.length}</td>
+                  <td>{formatPackageCoverage(item.documentPackage, locale)}</td>
+                  <td>{item.documentPackage?.summary.clauseCount ?? 0}</td>
                   <td>{item.documentIntelligence.risks.length}</td>
                   <td>
                     {formatGeneratedText(
@@ -4553,6 +4692,7 @@ function OpportunityPreview({
   );
   const visibleScore = profileScore ?? bestScore;
   const intelligence = detail.documentIntelligence;
+  const documentPackage = detail.documentPackage;
   const selectedComplianceItems = applyStudio.complianceItems.filter(
     (item) => item.opportunityId === detail.opportunity.id
   );
@@ -4629,6 +4769,27 @@ function OpportunityPreview({
           }
         >
           {t(locale, "downloadPack")}
+        </button>
+        <button
+          type="button"
+          className="secondary-action mini-action"
+          disabled={!documentPackage}
+          onClick={() => {
+            if (!documentPackage) {
+              return;
+            }
+
+            downloadTextFile(
+              `${slugifyFileName(detail.opportunity.title)}-document-brief.md`,
+              buildDocumentPackageMarkdown({
+                opportunity: detail.opportunity,
+                documentPackage
+              }),
+              "text/markdown;charset=utf-8"
+            );
+          }}
+        >
+          {t(locale, "downloadDocumentBrief")}
         </button>
       </div>
 
@@ -4776,6 +4937,8 @@ function OpportunityPreview({
         </div>
       </section>
 
+      <DocumentPackagePanel documentPackage={documentPackage} locale={locale} />
+
       <section className="preview-section">
         <div className="section-heading">
           <h4>{t(locale, "documentIntelligence")}</h4>
@@ -4871,6 +5034,178 @@ function OpportunityPreview({
         />
       </section>
     </aside>
+  );
+}
+
+interface DocumentPackagePanelProps {
+  documentPackage: TenderDocumentPackage | undefined;
+  locale: Locale;
+}
+
+function DocumentPackagePanel({ documentPackage, locale }: DocumentPackagePanelProps) {
+  if (!documentPackage) {
+    return (
+      <section className="preview-section document-package-panel">
+        <div className="section-heading">
+          <h4>{t(locale, "documentPackage")}</h4>
+          <span>{t(locale, "notAvailable")}</span>
+        </div>
+        <p className="muted">{t(locale, "noDocumentPackage")}</p>
+      </section>
+    );
+  }
+
+  const visibleItems = documentPackage.items.slice(0, 6);
+  const visibleTimeline = documentPackage.timeline.slice(0, 6);
+  const visibleClauses = sortClausesForPreview(documentPackage.clauses).slice(0, 6);
+
+  return (
+    <section className="preview-section document-package-panel">
+      <div className="section-heading">
+        <h4>{t(locale, "documentPackage")}</h4>
+        <span>
+          {t(locale, "updated")} {formatDate(documentPackage.updatedAt, locale)}
+        </span>
+      </div>
+
+      <div className="package-stats">
+        <div>
+          <strong>{documentPackage.coveragePercent}%</strong>
+          <span>{t(locale, "packageCoverage")}</span>
+        </div>
+        <div>
+          <strong>{documentPackage.summary.needsAttentionCount}</strong>
+          <span>{t(locale, "packageAttention")}</span>
+        </div>
+        <div>
+          <strong>{documentPackage.summary.riskClauseCount}</strong>
+          <span>{t(locale, "highRiskClauses")}</span>
+        </div>
+      </div>
+
+      <PackageListBlock
+        emptyLabel={t(locale, "noDocumentPackage")}
+        items={visibleItems}
+        locale={locale}
+        title={t(locale, "sourceDocuments")}
+      />
+      <TimelineBlock
+        emptyLabel={t(locale, "noTimelineItems")}
+        items={visibleTimeline}
+        locale={locale}
+        title={t(locale, "changeTimeline")}
+      />
+      <ClauseBlock
+        clauses={visibleClauses}
+        emptyLabel={t(locale, "noClausesDetected")}
+        locale={locale}
+        title={t(locale, "extractedClauses")}
+      />
+    </section>
+  );
+}
+
+interface PackageListBlockProps {
+  emptyLabel: string;
+  items: TenderDocumentPackageItem[];
+  locale: Locale;
+  title: string;
+}
+
+function PackageListBlock({ emptyLabel, items, locale, title }: PackageListBlockProps) {
+  return (
+    <div className="package-block">
+      <strong>{title}</strong>
+      {items.length === 0 ? (
+        <span className="muted">{emptyLabel}</span>
+      ) : (
+        <div className="package-item-list">
+          {items.map((item) => (
+            <div key={item.id} className="package-item">
+              <div>
+                <strong>{formatPackageItemTitle(item, locale)}</strong>
+                <span>
+                  {DOCUMENT_KIND_LABELS[locale][item.kind]} -{" "}
+                  {formatPackageItemDescription(item.description, locale)}
+                </span>
+              </div>
+              <span className={getDocumentPackageStatusClass(item.status)}>
+                {DOCUMENT_PACKAGE_STATUS_LABELS[locale][item.status]}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface TimelineBlockProps {
+  emptyLabel: string;
+  items: TenderChangeTimelineItem[];
+  locale: Locale;
+  title: string;
+}
+
+function TimelineBlock({ emptyLabel, items, locale, title }: TimelineBlockProps) {
+  return (
+    <div className="package-block">
+      <strong>{title}</strong>
+      {items.length === 0 ? (
+        <span className="muted">{emptyLabel}</span>
+      ) : (
+        <ol className="timeline-list">
+          {items.map((item) => (
+            <li key={item.id}>
+              <time dateTime={item.occurredAt}>
+                {formatDate(item.occurredAt, locale)}
+              </time>
+              <div>
+                <strong>{formatTimelineTitle(item.title, locale)}</strong>
+                {item.summary ? (
+                  <span>{formatTimelineSummary(item.summary, locale)}</span>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+interface ClauseBlockProps {
+  clauses: ExtractedTenderClause[];
+  emptyLabel: string;
+  locale: Locale;
+  title: string;
+}
+
+function ClauseBlock({ clauses, emptyLabel, locale, title }: ClauseBlockProps) {
+  return (
+    <div className="package-block">
+      <strong>{title}</strong>
+      {clauses.length === 0 ? (
+        <span className="muted">{emptyLabel}</span>
+      ) : (
+        <div className="clause-list">
+          {clauses.map((clause) => (
+            <article key={clause.id} className="clause-item">
+              <div className="clause-head">
+                <strong>{CLAUSE_TYPE_LABELS[locale][clause.type]}</strong>
+                <span className={getClauseSeverityClass(clause.severity)}>
+                  {CLAUSE_SEVERITY_LABELS[locale][clause.severity]}
+                </span>
+              </div>
+              <p>{formatClauseText(clause.text, locale)}</p>
+              <span>
+                {t(locale, "confidence")} {Math.round(clause.confidence * 100)}%
+              </span>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -6316,6 +6651,228 @@ function formatDocumentStatus(
   locale: Locale
 ): string {
   return status ? DOCUMENT_STATUS_LABELS[locale][status] : t(locale, "notAvailable");
+}
+
+function formatPackageCoverage(
+  documentPackage: TenderDocumentPackage | undefined,
+  locale: Locale
+): string {
+  if (!documentPackage) {
+    return t(locale, "notAvailable");
+  }
+
+  return `${documentPackage.coveragePercent}%`;
+}
+
+function formatPackageItemTitle(item: TenderDocumentPackageItem, locale: Locale): string {
+  if (locale !== "bg") {
+    return item.title;
+  }
+
+  const exact: Record<string, string> = {
+    "Official notice": "Официално обявление",
+    "Structured metadata snapshot": "Структуриран преглед на метаданните",
+    "Official attachment bundle": "Официален пакет с прикачени файлове",
+    Lot: "Обособена позиция",
+    "Contract amendment": "Анекс към договор"
+  };
+
+  return exact[item.title] ?? formatGeneratedText(item.title, locale);
+}
+
+function formatPackageItemDescription(value: string | undefined, locale: Locale): string {
+  if (!value) {
+    return t(locale, "noSignal");
+  }
+
+  if (locale !== "bg") {
+    return value;
+  }
+
+  const exact: Record<string, string> = {
+    "Primary tender notice from the public procurement source.":
+      "Основно тръжно обявление от публичния източник.",
+    "Normalized buyer, CPV, value, deadline, profile score, and source metadata.":
+      "Нормализирани данни за възложител, CPV, стойност, срок, оценка и източник.",
+    "Download and archive the official tender attachments before final submission.":
+      "Изтегли и архивирай официалните прикачени файлове преди финално подаване.",
+    "Required bid package document detected by document intelligence.":
+      "Необходим документ за пакета, открит от анализа на документи.",
+    "Certification, authorization, or equivalent evidence to verify.":
+      "Сертификат, оторизация или еквивалентно доказателство за проверка.",
+    "Linked contract history.": "Свързана договорна история."
+  };
+
+  const exactMatch = exact[value];
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const supplierMatch = /^Awarded supplier: (.+)$/.exec(value);
+  if (supplierMatch) {
+    return `Спечелил доставчик: ${supplierMatch[1] ?? ""}`;
+  }
+
+  const lotSummary = formatLotSummaryText(value, locale);
+  if (lotSummary !== value) {
+    return lotSummary;
+  }
+
+  return formatGeneratedText(value, locale);
+}
+
+function formatTimelineTitle(value: string, locale: Locale): string {
+  if (locale !== "bg") {
+    return value;
+  }
+
+  const exact: Record<string, string> = {
+    "Notice published": "Публикувано обявление",
+    "Document intelligence extracted": "Извлечен анализ на документи",
+    "Submission deadline": "Краен срок за подаване",
+    "Source snapshot available": "Наличен преглед от източника",
+    "Linked contract award": "Свързано възлагане",
+    "Contract amendment": "Анекс към договор"
+  };
+  const awardMatch = /^Award to (.+)$/.exec(value);
+
+  if (awardMatch) {
+    return `Възложено на ${awardMatch[1] ?? ""}`;
+  }
+
+  return exact[value] ?? formatGeneratedText(value, locale);
+}
+
+function formatTimelineSummary(value: string, locale: Locale): string {
+  if (locale !== "bg") {
+    return value;
+  }
+
+  const extractedMatch =
+    /^(\d+) required documents, (\d+) certifications, and (\d+) risks were detected\.$/.exec(
+      value
+    );
+  if (extractedMatch) {
+    return `Открити са ${extractedMatch[1] ?? "0"} необходими документа, ${extractedMatch[2] ?? "0"} сертификата и ${extractedMatch[3] ?? "0"} риска.`;
+  }
+
+  const sourceMatch = /^(.+) published the tender metadata\.$/.exec(value);
+  if (sourceMatch) {
+    return `${sourceMatch[1] ?? ""} публикува метаданните на търга.`;
+  }
+
+  const exact: Record<string, string> = {
+    "Final tender submission deadline from the crawled metadata.":
+      "Финален срок за подаване според събраните метаданни.",
+    "The opportunity has structured metadata but no dated changes yet.":
+      "Възможността има структурирани метаданни, но все още няма датирани промени.",
+    "Lot metadata requires review.": "Метаданните за позицията изискват преглед."
+  };
+
+  const lotSummary = formatLotSummaryText(value, locale);
+  if (lotSummary !== value) {
+    return lotSummary;
+  }
+
+  return exact[value] ?? formatGeneratedText(value, locale);
+}
+
+function formatClauseText(value: string, locale: Locale): string {
+  if (locale !== "bg") {
+    return value;
+  }
+
+  const deadlineMatch =
+    /^Submit before (.+)\. Build an internal checkpoint before the official deadline\.$/.exec(
+      value
+    );
+  if (deadlineMatch) {
+    return `Подай преди ${formatDate(deadlineMatch[1], locale)}. Създай вътрешна контролна точка преди официалния срок.`;
+  }
+
+  const valueMatch =
+    /^Estimated value is (.+)\. Validate delivery cost, margin, warranty reserve, and bid preparation cost before applying\.$/.exec(
+      value
+    );
+  if (valueMatch) {
+    return `Прогнозната стойност е ${valueMatch[1] ?? ""}. Провери разхода за изпълнение, маржа, гаранционния резерв и цената за подготовка преди участие.`;
+  }
+
+  const amendmentMatch = /^Value changed from (.+) to (.+)\.$/.exec(value);
+  if (amendmentMatch) {
+    return `Стойността е променена от ${amendmentMatch[1] ?? ""} на ${amendmentMatch[2] ?? ""}.`;
+  }
+
+  const lotSummary = formatLotSummaryText(value, locale);
+  if (lotSummary !== value) {
+    return lotSummary;
+  }
+
+  return formatGeneratedText(value, locale);
+}
+
+function formatLotSummaryText(value: string, locale: Locale): string {
+  if (locale !== "bg") {
+    return value;
+  }
+
+  const lotMatch = /^CPV (.+?)(?: - ([^-]+? [A-Z]{3}))?(?: - deadline (.+))?$/.exec(
+    value
+  );
+  if (!lotMatch) {
+    return value;
+  }
+
+  const parts = [
+    `CPV ${lotMatch[1] ?? ""}`,
+    lotMatch[2],
+    lotMatch[3] ? `срок ${formatDate(lotMatch[3], locale)}` : undefined
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.join(" - ");
+}
+
+function sortClausesForPreview(
+  clauses: ExtractedTenderClause[]
+): ExtractedTenderClause[] {
+  const severityRank: Record<TenderClauseSeverity, number> = {
+    risk: 0,
+    watch: 1,
+    info: 2
+  };
+
+  return [...clauses].sort((left, right) => {
+    const severityDelta = severityRank[left.severity] - severityRank[right.severity];
+    if (severityDelta !== 0) {
+      return severityDelta;
+    }
+
+    return right.confidence - left.confidence;
+  });
+}
+
+function getDocumentPackageStatusClass(status: TenderDocumentStatus): string {
+  if (status === "available" || status === "extracted") {
+    return "signal-badge signal-positive";
+  }
+
+  if (status === "failed") {
+    return "signal-badge signal-risk";
+  }
+
+  return "signal-badge signal-warning";
+}
+
+function getClauseSeverityClass(severity: TenderClauseSeverity): string {
+  if (severity === "risk") {
+    return "signal-badge signal-risk";
+  }
+
+  if (severity === "watch") {
+    return "signal-badge signal-warning";
+  }
+
+  return "signal-badge signal-positive";
 }
 
 function formatEvidenceType(type: EvidenceType, locale: Locale): string {

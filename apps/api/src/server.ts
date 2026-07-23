@@ -19,6 +19,7 @@ import {
 } from "@public-scanner/db";
 import {
   BUSINESS_PROFILES,
+  buildTenderDocumentPackage,
   type AlertChannel,
   type AlertRuleInput,
   type ApplicationStage,
@@ -26,6 +27,7 @@ import {
   type ComplianceItemInput,
   type ComplianceRequirementType,
   type ComplianceStatus,
+  type DocumentIntelligence,
   type EvidenceItemInput,
   type EvidenceType,
   type Opportunity,
@@ -639,18 +641,24 @@ function getSessionExpiry(): Date {
 }
 
 function buildEmptyOpportunityDetail(opportunity: Opportunity): OpportunityDetail {
+  const documentIntelligence: DocumentIntelligence = {
+    status: "not-available",
+    eligibilityCriteria: [],
+    requiredDocuments: [],
+    certifications: [],
+    risks: []
+  };
+
   return {
     opportunity,
     lots: [],
     contracts: [],
     amendments: [],
-    documentIntelligence: {
-      status: "not-available",
-      eligibilityCriteria: [],
-      requiredDocuments: [],
-      certifications: [],
-      risks: []
-    },
+    documentIntelligence,
+    documentPackage: buildTenderDocumentPackage({
+      opportunity,
+      documentIntelligence
+    }),
     competitorInsights: []
   };
 }
@@ -658,16 +666,24 @@ function buildEmptyOpportunityDetail(opportunity: Opportunity): OpportunityDetai
 function buildFallbackDashboard(opportunities: Opportunity[]): ProcurementDashboard {
   return {
     pipeline: [],
-    documents: opportunities.map((opportunity) => ({
-      opportunity,
-      documentIntelligence: {
+    documents: opportunities.map((opportunity) => {
+      const documentIntelligence: DocumentIntelligence = {
         status: "not-available",
         eligibilityCriteria: [],
         requiredDocuments: [],
         certifications: [],
         risks: []
-      }
-    })),
+      };
+
+      return {
+        opportunity,
+        documentIntelligence,
+        documentPackage: buildTenderDocumentPackage({
+          opportunity,
+          documentIntelligence
+        })
+      };
+    }),
     contracts: [],
     buyers: [],
     suppliers: [],
