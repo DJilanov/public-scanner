@@ -505,7 +505,7 @@ describe("api server", () => {
 
     const response = await server.inject({
       method: "GET",
-      url: "/api/opportunities?status=open&source=ted&minScore=50&limit=25&buyer=Agency&cpvPrefix=722&deadlineTo=2026-08-31&profileIds=hardware-supply,cybersecurity&countryCodes=BG,RO&includeInternationalSources=true&selectedInternationalSourceIds=eu-ted,worldbank"
+      url: "/api/opportunities?status=open&source=ted&minScore=50&minAiBusinessFit=75&minAiReadiness=70&minAiCommercial=60&minAiConfidence=80&limit=25&buyer=Agency&cpvPrefix=722&deadlineTo=2026-08-31&profileIds=hardware-supply,cybersecurity&countryCodes=BG,RO&includeInternationalSources=true&selectedInternationalSourceIds=eu-ted,worldbank"
     });
 
     expect(response.statusCode).toBe(200);
@@ -514,6 +514,10 @@ describe("api server", () => {
       status: "open",
       source: "ted",
       minScore: 50,
+      minAiBusinessFit: 75,
+      minAiReadiness: 70,
+      minAiCommercial: 60,
+      minAiConfidence: 80,
       limit: 25,
       profileIds: ["hardware-supply", "cybersecurity"],
       countryCodes: ["BG", "RO"],

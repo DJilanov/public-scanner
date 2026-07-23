@@ -80,6 +80,10 @@ export interface UpsertOpportunityResult {
 export interface OpportunityListFilters {
   limit?: number;
   minScore?: number;
+  minAiBusinessFit?: number;
+  minAiReadiness?: number;
+  minAiCommercial?: number;
+  minAiConfidence?: number;
   profileIds?: BusinessProfileId[];
   status?: OpportunityStatus;
   source?: ProcurementSource;

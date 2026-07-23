@@ -147,6 +147,10 @@ interface Filters {
   sector: SectorFilter;
   funding: FundingFilter;
   minScore: string;
+  minAiBusinessFit: string;
+  minAiReadiness: string;
+  minAiCommercial: string;
+  minAiConfidence: string;
   deadlineTo: string;
 }
 
@@ -264,6 +268,10 @@ const DEFAULT_FILTERS: Filters = {
   sector: "",
   funding: "",
   minScore: "",
+  minAiBusinessFit: "",
+  minAiReadiness: "",
+  minAiCommercial: "",
+  minAiConfidence: "",
   deadlineTo: ""
 };
 
@@ -471,8 +479,13 @@ const TRANSLATIONS = {
     viewHardware: "Hardware only",
     viewServices: "Services only",
     viewHighFit: "High fit",
+    viewAiReady: "AI ready",
     viewDeadlineSoon: "Deadline soon",
     viewEuFunded: "EU funded",
+    minAiBusinessFit: "AI fit",
+    minAiReadiness: "AI readiness",
+    minAiCommercial: "AI commercial",
+    minAiConfidence: "AI confidence",
     business: "Business",
     search: "Search",
     buyer: "Buyer",
@@ -865,8 +878,13 @@ const TRANSLATIONS = {
     viewHardware: "Само хардуер",
     viewServices: "Само услуги",
     viewHighFit: "Силно съвпадение",
+    viewAiReady: "AI готови",
     viewDeadlineSoon: "Скоро изтичащи",
     viewEuFunded: "ЕС финансиране",
+    minAiBusinessFit: "AI съвпадение",
+    minAiReadiness: "AI готовност",
+    minAiCommercial: "AI търговски",
+    minAiConfidence: "AI увереност",
     business: "Бизнес",
     search: "Търсене",
     buyer: "Възложител",
@@ -2987,7 +3005,59 @@ export function App() {
                 onChange={(event) =>
                   setFilters((current) => ({
                     ...current,
-                    minScore: event.target.value.replace(/\D/g, "").slice(0, 3)
+                    minScore: normalizeScoreInput(event.target.value)
+                  }))
+                }
+              />
+            </label>
+            <label>
+              <span>{t(locale, "minAiBusinessFit")}</span>
+              <input
+                inputMode="numeric"
+                value={filters.minAiBusinessFit}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    minAiBusinessFit: normalizeScoreInput(event.target.value)
+                  }))
+                }
+              />
+            </label>
+            <label>
+              <span>{t(locale, "minAiReadiness")}</span>
+              <input
+                inputMode="numeric"
+                value={filters.minAiReadiness}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    minAiReadiness: normalizeScoreInput(event.target.value)
+                  }))
+                }
+              />
+            </label>
+            <label>
+              <span>{t(locale, "minAiCommercial")}</span>
+              <input
+                inputMode="numeric"
+                value={filters.minAiCommercial}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    minAiCommercial: normalizeScoreInput(event.target.value)
+                  }))
+                }
+              />
+            </label>
+            <label>
+              <span>{t(locale, "minAiConfidence")}</span>
+              <input
+                inputMode="numeric"
+                value={filters.minAiConfidence}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    minAiConfidence: normalizeScoreInput(event.target.value)
                   }))
                 }
               />
@@ -7091,6 +7161,10 @@ function buildOpportunityUrl(
     cpvPrefix: filters.cpvPrefix,
     source: filters.source,
     minScore: getEffectiveMinScore(filters),
+    minAiBusinessFit: filters.minAiBusinessFit,
+    minAiReadiness: filters.minAiReadiness,
+    minAiCommercial: filters.minAiCommercial,
+    minAiConfidence: filters.minAiConfidence,
     deadlineTo: filters.deadlineTo
   };
 
@@ -7364,9 +7438,27 @@ function normalizeFilters(value: Partial<Filters> | undefined): Filters {
     source: normalizeTextFilter(value?.source),
     sector: value?.sector && SECTOR_FILTERS.includes(value.sector) ? value.sector : "",
     funding: value?.funding === "eu-funded" ? "eu-funded" : "",
-    minScore: normalizeTextFilter(value?.minScore).replace(/\D/g, "").slice(0, 3),
+    minScore: normalizeScoreInput(value?.minScore),
+    minAiBusinessFit: normalizeScoreInput(value?.minAiBusinessFit),
+    minAiReadiness: normalizeScoreInput(value?.minAiReadiness),
+    minAiCommercial: normalizeScoreInput(value?.minAiCommercial),
+    minAiConfidence: normalizeScoreInput(value?.minAiConfidence),
     deadlineTo: normalizeTextFilter(value?.deadlineTo)
   };
+}
+
+function normalizeScoreInput(value: unknown): string {
+  const digits = normalizeTextFilter(value).replace(/\D/g, "").slice(0, 3);
+  if (!digits) {
+    return "";
+  }
+
+  const parsed = Number(digits);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return "";
+  }
+
+  return String(Math.min(100, Math.trunc(parsed)));
 }
 
 function normalizeTextFilter(value: unknown): string {
@@ -7398,6 +7490,16 @@ function getBuiltInOpportunityViews(
       filters: { minScore: "78" }
     },
     {
+      id: "ai-ready",
+      name: t(locale, "viewAiReady"),
+      filters: {
+        minScore: "62",
+        minAiBusinessFit: "75",
+        minAiReadiness: "70",
+        minAiConfidence: "70"
+      }
+    },
+    {
       id: "deadline-soon",
       name: t(locale, "viewDeadlineSoon"),
       filters: { deadlineTo: formatDateInput(addDays(new Date(), 30)) }
@@ -7417,6 +7519,18 @@ function formatActiveFilterSummary(filters: Filters, locale: Locale): string {
     filters.funding ? t(locale, "euFundedOnly") : undefined,
     filters.source ? filters.source.toUpperCase() : undefined,
     effectiveMinScore ? `${t(locale, "score")} ${effectiveMinScore}+` : undefined,
+    filters.minAiBusinessFit
+      ? `${t(locale, "minAiBusinessFit")} ${filters.minAiBusinessFit}+`
+      : undefined,
+    filters.minAiReadiness
+      ? `${t(locale, "minAiReadiness")} ${filters.minAiReadiness}+`
+      : undefined,
+    filters.minAiCommercial
+      ? `${t(locale, "minAiCommercial")} ${filters.minAiCommercial}+`
+      : undefined,
+    filters.minAiConfidence
+      ? `${t(locale, "minAiConfidence")} ${filters.minAiConfidence}+`
+      : undefined,
     filters.deadlineTo
       ? `${t(locale, "deadline")} ${formatDate(filters.deadlineTo, locale)}`
       : undefined,

@@ -167,6 +167,7 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
     }
 
     appendMarketConditions("o", filters, conditions, values);
+    appendAiAnalysisConditions("o", filters, conditions, values);
 
     if (filters.minScore !== undefined) {
       values.push(filters.minScore);
@@ -1476,6 +1477,11 @@ interface SourceHealthQuery {
   metricWhereSql: string;
 }
 
+type TenderAiScoreKey = keyof Pick<
+  TenderAiAnalysis,
+  "businessFitScore" | "readinessScore" | "commercialScore" | "dataConfidenceScore"
+>;
+
 function buildOpportunityWhere(
   filters: OpportunityListFilters,
   alias: string,
@@ -1503,6 +1509,7 @@ function appendDashboardOpportunityConditions(
   }
 
   appendMarketConditions(alias, filters, conditions, values);
+  appendAiAnalysisConditions(alias, filters, conditions, values);
 }
 
 function appendMarketConditions(
@@ -1716,6 +1723,70 @@ function appendSourceMetricOpportunityConditions(
       `coalesce(${alias}.opportunity_kind, 'procurement') = ANY($${values.length}::text[])`
     );
   }
+
+  appendAiAnalysisConditions(alias, filters, conditions, values);
+}
+
+function appendAiAnalysisConditions(
+  alias: string,
+  filters: OpportunityListFilters,
+  conditions: string[],
+  values: unknown[]
+): void {
+  const aiConditions: string[] = [];
+
+  appendAiScoreCondition(
+    "businessFitScore",
+    filters.minAiBusinessFit,
+    aiConditions,
+    values
+  );
+  appendAiScoreCondition("readinessScore", filters.minAiReadiness, aiConditions, values);
+  appendAiScoreCondition(
+    "commercialScore",
+    filters.minAiCommercial,
+    aiConditions,
+    values
+  );
+  appendAiScoreCondition(
+    "dataConfidenceScore",
+    filters.minAiConfidence,
+    aiConditions,
+    values
+  );
+
+  if (aiConditions.length === 0) {
+    return;
+  }
+
+  conditions.push(`EXISTS (
+    SELECT 1
+    FROM document_intelligence ai_di
+    WHERE ai_di.opportunity_id = ${alias}.id
+      AND ${aiConditions.join(" AND ")}
+  )`);
+}
+
+function appendAiScoreCondition(
+  key: TenderAiScoreKey,
+  threshold: number | undefined,
+  conditions: string[],
+  values: unknown[]
+): void {
+  if (threshold === undefined) {
+    return;
+  }
+
+  values.push(threshold);
+  conditions.push(`${aiAnalysisScoreSql("ai_di.ai_analysis", key)} >= $${values.length}`);
+}
+
+function aiAnalysisScoreSql(columnSql: string, key: TenderAiScoreKey): string {
+  return `CASE
+    WHEN (${columnSql}->>'${key}') ~ '^[0-9]+(\\.[0-9]+)?$'
+    THEN round((${columnSql}->>'${key}')::numeric)::integer
+    ELSE NULL
+  END`;
 }
 
 function sourceIdSql(alias: string): string {

@@ -983,6 +983,18 @@ function parseOpportunityFilters(
 ): OpportunityListFilters {
   const limit = query.limit ? parsePositiveInteger(query.limit) : undefined;
   const minScore = query.minScore ? parsePositiveInteger(query.minScore) : undefined;
+  const minAiBusinessFit = query.minAiBusinessFit
+    ? parseScoreFilter(query.minAiBusinessFit)
+    : undefined;
+  const minAiReadiness = query.minAiReadiness
+    ? parseScoreFilter(query.minAiReadiness)
+    : undefined;
+  const minAiCommercial = query.minAiCommercial
+    ? parseScoreFilter(query.minAiCommercial)
+    : undefined;
+  const minAiConfidence = query.minAiConfidence
+    ? parseScoreFilter(query.minAiConfidence)
+    : undefined;
   const profileIds = parseBusinessProfileIds(query.profileIds);
   const countryCodes = query.countryCodes
     ? parseCountryCodes(query.countryCodes)
@@ -1015,6 +1027,10 @@ function parseOpportunityFilters(
       : {}),
     ...(limit !== undefined ? { limit } : {}),
     ...(minScore !== undefined ? { minScore } : {}),
+    ...(minAiBusinessFit !== undefined ? { minAiBusinessFit } : {}),
+    ...(minAiReadiness !== undefined ? { minAiReadiness } : {}),
+    ...(minAiCommercial !== undefined ? { minAiCommercial } : {}),
+    ...(minAiConfidence !== undefined ? { minAiConfidence } : {}),
     ...(profileIds ? { profileIds } : {}),
     ...(countryCodes ? { countryCodes } : {}),
     ...(sourceIds ? { sourceIds } : {}),
@@ -1252,6 +1268,15 @@ function parsePositiveInteger(value: string): number | undefined {
   }
 
   return Math.trunc(parsed);
+}
+
+function parseScoreFilter(value: string): number | undefined {
+  const parsed = parsePositiveInteger(value);
+  if (parsed === undefined || parsed > 100) {
+    return undefined;
+  }
+
+  return parsed;
 }
 
 function isValidStatus(value: string): value is OpportunityStatus {

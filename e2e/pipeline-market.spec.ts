@@ -194,8 +194,12 @@ test("deep linked pipeline supports market scoped work queues", async ({ page })
   );
   await expect(page.getByRole("heading", { name: "Application Pipeline" })).toBeVisible();
 
-  await expect(page.getByText("Bulgarian e-services platform")).toBeVisible();
-  await expect(page.getByText("Romania data center refresh")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Bulgarian e-services platform" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Romania data center refresh" })
+  ).toBeVisible();
   await expect(page.getByText("Global cloud procurement framework")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Global records paused" }).click();
@@ -205,7 +209,9 @@ test("deep linked pipeline supports market scoped work queues", async ({ page })
   await page.getByLabel("Market", { exact: true }).selectOption("RO");
 
   await expect(page.getByText("Romania data center refresh")).toBeVisible();
-  await expect(page.getByText("Bulgarian e-services platform")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Bulgarian e-services platform" })
+  ).toHaveCount(0);
   await expect(page.getByText("Global cloud procurement framework")).toHaveCount(0);
 
   await page.getByRole("link", { name: "Documents" }).click();
@@ -247,6 +253,50 @@ test("sources explain western europe coverage", async ({ page }) => {
   await expect(page.getByText("Germany e-Vergabe / service.bund")).toBeVisible();
   await expect(
     page.getByText("TED high-value coverage; national connector planned")
+  ).toBeVisible();
+});
+
+test("opportunity workbench supports AI score filters", async ({ page }) => {
+  await page.goto("/#opportunities");
+
+  await expect(page.getByText("Bulgarian e-services platform")).toBeVisible();
+  await expect(page.getByText("Romania data center refresh")).toBeVisible();
+
+  const filteredRequest = page.waitForRequest((request) => {
+    if (!request.url().includes("/api/opportunities?")) {
+      return false;
+    }
+
+    return new URL(request.url()).searchParams.get("minAiBusinessFit") === "90";
+  });
+
+  await page.getByLabel("AI fit").fill("90");
+  await filteredRequest;
+
+  await expect(page.getByText("No matching opportunities")).toBeVisible();
+  await expect(page.getByText("Bulgarian e-services platform")).toHaveCount(0);
+
+  const aiReadyRequest = page.waitForRequest((request) => {
+    if (!request.url().includes("/api/opportunities?")) {
+      return false;
+    }
+
+    const params = new URL(request.url()).searchParams;
+    return (
+      params.get("minAiBusinessFit") === "75" &&
+      params.get("minAiReadiness") === "70" &&
+      params.get("minAiConfidence") === "70"
+    );
+  });
+
+  await page.getByRole("button", { name: "AI ready" }).click();
+  await aiReadyRequest;
+
+  await expect(
+    page.getByRole("button", { name: "Bulgarian e-services platform" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Romania data center refresh" })
   ).toBeVisible();
 });
 
@@ -327,10 +377,23 @@ async function mockApi(page: Page): Promise<void> {
   });
 
   await page.route(/\/api\/opportunities\?/, async (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    const minAiBusinessFit = Number(params.get("minAiBusinessFit") ?? 0);
+    const minAiReadiness = Number(params.get("minAiReadiness") ?? 0);
+    const minAiCommercial = Number(params.get("minAiCommercial") ?? 0);
+    const minAiConfidence = Number(params.get("minAiConfidence") ?? 0);
+
     await route.fulfill({
       json: {
         data: dashboard.pipeline
           .filter((item) => item.opportunity.sourceId !== "worldbank")
+          .filter(
+            () =>
+              documentIntelligence.aiAnalysis.businessFitScore >= minAiBusinessFit &&
+              documentIntelligence.aiAnalysis.readinessScore >= minAiReadiness &&
+              documentIntelligence.aiAnalysis.commercialScore >= minAiCommercial &&
+              documentIntelligence.aiAnalysis.dataConfidenceScore >= minAiConfidence
+          )
           .map((item) => item.opportunity)
       }
     });
