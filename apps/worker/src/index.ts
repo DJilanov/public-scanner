@@ -1,6 +1,7 @@
 import {
-  buildBulgarianSoftwareTedQuery,
+  buildTedIctQuery,
   CaisOpenDataClient,
+  DEFAULT_TED_MARKET_COUNTRY_CODES,
   TED_SOFTWARE_FIELDS,
   TedClient,
   type CaisOpenDataFile,
@@ -12,6 +13,7 @@ import {
   normalizeCaisAnnexRecord,
   normalizeCaisContractRecord,
   normalizeOcdsLots,
+  normalizeCountryCodes,
   normalizeTedNoticeRecord,
   scoreNormalizedOpportunity,
   type NormalizedContract,
@@ -19,7 +21,8 @@ import {
   type NormalizedOpportunityWithScore,
   type NormalizedOpportunityLot,
   type ProcurementSource,
-  type SourceRunSummary
+  type SourceRunSummary,
+  type SupportedCountryCode
 } from "@public-scanner/domain";
 import {
   createDatabasePool,
@@ -96,6 +99,7 @@ export interface WorkerRunOptions {
   store?: IngestionStore;
   includeCais?: boolean;
   includeTed?: boolean;
+  tedCountryCodes?: SupportedCountryCode[];
   tedMaxPages?: number;
   runMigrations?: boolean;
 }
@@ -103,6 +107,7 @@ export interface WorkerRunOptions {
 export interface WorkerRunResult {
   cais?: SourceRunSummary;
   ted?: SourceRunSummary;
+  tedCountryCodes?: SupportedCountryCode[];
   tedQuery?: string;
 }
 
@@ -148,7 +153,14 @@ export async function runOnce(options: WorkerRunOptions = {}): Promise<WorkerRun
     }
 
     if (options.includeTed ?? true) {
-      const tedQuery = buildBulgarianSoftwareTedQuery(sourceDate.replaceAll("-", ""));
+      const tedCountryCodes =
+        options.tedCountryCodes ??
+        normalizeCountryCodes(DEFAULT_TED_MARKET_COUNTRY_CODES);
+      const tedQuery = buildTedIctQuery({
+        buyerCountryCodes: tedCountryCodes.map(toTedBuyerCountryCode),
+        publicationDateFrom: sourceDate.replaceAll("-", "")
+      });
+      result.tedCountryCodes = tedCountryCodes;
       result.tedQuery = tedQuery;
       result.ted = await ingestTed({
         sourceDate,
@@ -724,6 +736,40 @@ function getPreviousDateIso(now: Date): string {
   return previousDay.toISOString().slice(0, 10);
 }
 
+function toTedBuyerCountryCode(countryCode: SupportedCountryCode): string {
+  return TED_BUYER_COUNTRY_CODES[countryCode] ?? countryCode;
+}
+
+const TED_BUYER_COUNTRY_CODES: Partial<Record<SupportedCountryCode, string>> = {
+  AL: "ALB",
+  AT: "AUT",
+  AU: "AUS",
+  BA: "BIH",
+  BE: "BEL",
+  BG: "BGR",
+  CA: "CAN",
+  DE: "DEU",
+  DK: "DNK",
+  ES: "ESP",
+  FI: "FIN",
+  FR: "FRA",
+  GB: "GBR",
+  GR: "GRC",
+  HR: "HRV",
+  IE: "IRL",
+  IT: "ITA",
+  LU: "LUX",
+  ME: "MNE",
+  MK: "MKD",
+  NL: "NLD",
+  PT: "PRT",
+  RO: "ROU",
+  RS: "SRB",
+  SE: "SWE",
+  SI: "SVN",
+  US: "USA"
+};
+
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown ingestion error";
 }
@@ -764,6 +810,7 @@ async function runFromEnvironment(): Promise<WorkerRunResult | WorkerRunResult[]
   const commonOptions = {
     includeCais: parseBooleanEnv("INCLUDE_CAIS", true),
     includeTed: parseBooleanEnv("INCLUDE_TED", true),
+    tedCountryCodes: getTedCountryCodesFromEnvironment(),
     ...(tedMaxPages !== undefined ? { tedMaxPages } : {})
   };
 
@@ -834,6 +881,15 @@ function getSourceDatesFromEnvironment(now: Date): string[] {
   }
 
   return dates;
+}
+
+function getTedCountryCodesFromEnvironment(): SupportedCountryCode[] {
+  const value = process.env.TED_COUNTRY_CODES;
+  if (!value) {
+    return normalizeCountryCodes(DEFAULT_TED_MARKET_COUNTRY_CODES);
+  }
+
+  return normalizeCountryCodes(value.split(","));
 }
 
 function enumerateDates(from: string, to: string): string[] {

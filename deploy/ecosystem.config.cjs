@@ -34,6 +34,9 @@ module.exports = {
         WORKER_MODE: process.env.WORKER_MODE || "scheduler",
         WORKER_INTERVAL_MINUTES: process.env.WORKER_INTERVAL_MINUTES || "360",
         BACKFILL_DAYS: process.env.BACKFILL_DAYS || "3",
+        TED_COUNTRY_CODES:
+          process.env.TED_COUNTRY_CODES ||
+          "BG,RO,GR,HR,SI,ME,AT,BE,DE,DK,ES,FI,FR,IE,IT,LU,NL,PT,SE",
         TED_MAX_PAGES: process.env.TED_MAX_PAGES || "20"
       }
     }

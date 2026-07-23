@@ -18,6 +18,19 @@ export const SUPPORTED_COUNTRIES: SupportedCountry[] = [
   { code: "AL", name: "Albania", region: "balkans" },
   { code: "BA", name: "Bosnia and Herzegovina", region: "balkans" },
   { code: "ME", name: "Montenegro", region: "balkans" },
+  { code: "AT", name: "Austria", region: "eu" },
+  { code: "BE", name: "Belgium", region: "eu" },
+  { code: "DE", name: "Germany", region: "eu" },
+  { code: "DK", name: "Denmark", region: "eu" },
+  { code: "ES", name: "Spain", region: "eu" },
+  { code: "FI", name: "Finland", region: "eu" },
+  { code: "FR", name: "France", region: "eu" },
+  { code: "IE", name: "Ireland", region: "eu" },
+  { code: "IT", name: "Italy", region: "eu" },
+  { code: "LU", name: "Luxembourg", region: "eu" },
+  { code: "NL", name: "Netherlands", region: "eu" },
+  { code: "PT", name: "Portugal", region: "eu" },
+  { code: "SE", name: "Sweden", region: "eu" },
   { code: "GB", name: "United Kingdom", region: "global" },
   { code: "US", name: "United States", region: "global" },
   { code: "CA", name: "Canada", region: "global" },
@@ -158,6 +171,59 @@ export const SOURCE_CATALOG: SourceCatalogItem[] = [
   ),
   nationalSource("ba-ejn", "Bosnia and Herzegovina eJN", "BA", "https://www.ejn.gov.ba/"),
   nationalSource("me-cejn", "Montenegro CeJN", "ME", "https://cejn.gov.me/"),
+  nationalSource("at-usp", "Austria USP Tender Search", "AT", "https://www.usp.gv.at/"),
+  nationalSource(
+    "be-eproc",
+    "Belgium e-Procurement",
+    "BE",
+    "https://www.publicprocurement.be/"
+  ),
+  nationalSource(
+    "de-evergabe",
+    "Germany e-Vergabe / service.bund",
+    "DE",
+    "https://www.evergabe-online.de/"
+  ),
+  nationalSource("dk-udbud", "Denmark Udbud.dk", "DK", "https://udbud.dk/"),
+  nationalSource(
+    "es-place",
+    "Spain Public Sector Procurement Platform",
+    "ES",
+    "https://contrataciondelestado.es/"
+  ),
+  nationalSource(
+    "fi-hilma",
+    "Finland Hilma",
+    "FI",
+    "https://www.hankintailmoitukset.fi/en/"
+  ),
+  nationalSource("fr-boamp", "France BOAMP / PLACE", "FR", "https://www.boamp.fr/"),
+  nationalSource("ie-etenders", "Ireland eTenders", "IE", "https://www.etenders.gov.ie/"),
+  nationalSource(
+    "it-anac-bdncp",
+    "Italy ANAC BDNCP",
+    "IT",
+    "https://dati.anticorruzione.it/opendata/ocds_en"
+  ),
+  nationalSource(
+    "lu-pmp",
+    "Luxembourg Portail des marches publics",
+    "LU",
+    "https://pmp.b2g.etat.lu/"
+  ),
+  nationalSource(
+    "nl-tenderned",
+    "Netherlands TenderNed",
+    "NL",
+    "https://www.tenderned.nl/"
+  ),
+  nationalSource("pt-base", "Portugal BASE", "PT", "https://www.base.gov.pt/Base4/en/"),
+  nationalSource(
+    "se-procurement-authority",
+    "Sweden Procurement Authority / TED",
+    "SE",
+    "https://www.upphandlingsmyndigheten.se/en/"
+  ),
   nationalSource(
     "uk-contracts-finder",
     "UK Contracts Finder",
@@ -274,19 +340,32 @@ function nationalSource(
 
 const COUNTRY_CODE_ALIASES: Record<string, SupportedCountryCode> = {
   ALB: "AL",
+  AUT: "AT",
   AUS: "AU",
+  BEL: "BE",
   BIH: "BA",
   BGR: "BG",
   CAN: "CA",
+  DEU: "DE",
+  DNK: "DK",
+  ESP: "ES",
+  FIN: "FI",
+  FRA: "FR",
   GBR: "GB",
   UK: "GB",
   EL: "GR",
   GRC: "GR",
   HRV: "HR",
+  IRL: "IE",
+  ITA: "IT",
+  LUX: "LU",
   MNE: "ME",
   MKD: "MK",
+  NLD: "NL",
+  PRT: "PT",
   ROU: "RO",
   RSR: "RS",
+  SWE: "SE",
   SRB: "RS",
   SVN: "SI",
   USA: "US"

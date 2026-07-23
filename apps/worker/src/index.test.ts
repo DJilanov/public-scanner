@@ -286,6 +286,34 @@ describe("worker ingestion", () => {
     });
   });
 
+  it("builds TED queries for configured regional and western markets", async () => {
+    const store = new MemoryIngestionStore();
+    let capturedQuery = "";
+    const tedClient: TedNoticeClient = {
+      async searchAllNotices(request) {
+        capturedQuery = request.query;
+
+        return {
+          totalNoticeCount: 0,
+          notices: []
+        };
+      }
+    };
+
+    const result = await runOnce({
+      sourceDate: "2026-07-22",
+      now: new Date("2026-07-23T00:00:00.000Z"),
+      store,
+      includeCais: false,
+      tedClient,
+      tedCountryCodes: ["RO", "DE", "FR"]
+    });
+
+    expect(result.tedCountryCodes).toEqual(["RO", "DE", "FR"]);
+    expect(capturedQuery).toContain("buyer-country IN (ROU DEU FRA)");
+    expect(capturedQuery).toContain("classification-cpv = 302*");
+  });
+
   it("runs backfill for multiple source dates", async () => {
     const store = new MemoryIngestionStore();
     const results = await runBackfill({

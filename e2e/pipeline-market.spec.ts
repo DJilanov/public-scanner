@@ -115,7 +115,32 @@ const dashboard = {
   contracts: [],
   buyers: [],
   suppliers: [],
-  sources: []
+  sources: [
+    {
+      source: "eu-ted",
+      sourceDisplayName: "TED",
+      status: "succeeded",
+      startedAt: "2026-07-23T08:00:00.000Z",
+      finishedAt: "2026-07-23T08:03:00.000Z",
+      fetchedCount: 25,
+      insertedCount: 8,
+      updatedCount: 17,
+      skippedCount: 0,
+      failedCount: 0,
+      recentErrorCount: 0
+    },
+    {
+      source: "de-evergabe",
+      sourceDisplayName: "Germany e-Vergabe / service.bund",
+      sourceCountryCode: "DE",
+      fetchedCount: 0,
+      insertedCount: 0,
+      updatedCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+      recentErrorCount: 0
+    }
+  ]
 };
 
 test.beforeEach(async ({ page }) => {
@@ -160,6 +185,24 @@ test("deep linked pipeline supports market scoped work queues", async ({ page })
     "aria-current",
     "page"
   );
+});
+
+test("sources explain western europe coverage", async ({ page }) => {
+  await page.goto("/#profile");
+
+  await expect(page.getByText("Western Europe markets")).toBeVisible();
+  await expect(page.getByText("Germany")).toBeVisible();
+  await expect(page.getByText("France")).toBeVisible();
+
+  await page.getByRole("link", { name: "Sources" }).click();
+
+  await expect(page).toHaveURL(/#sources$/);
+  await expect(page.getByText("TED", { exact: true })).toBeVisible();
+  await expect(page.getByText("Active fetcher")).toBeVisible();
+  await expect(page.getByText("Germany e-Vergabe / service.bund")).toBeVisible();
+  await expect(
+    page.getByText("TED high-value coverage; national connector planned")
+  ).toBeVisible();
 });
 
 async function mockApi(page: Page): Promise<void> {

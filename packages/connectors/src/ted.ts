@@ -66,6 +66,42 @@ export const TED_SOFTWARE_CPV_PREFIXES = [
   "794"
 ] as const;
 
+export const TED_ICT_CPV_PREFIXES = [
+  ...TED_SOFTWARE_CPV_PREFIXES,
+  "30",
+  "302",
+  "323",
+  "324",
+  "325",
+  "386",
+  "488",
+  "503",
+  "5033",
+  "713"
+] as const;
+
+export const DEFAULT_TED_MARKET_COUNTRY_CODES = [
+  "BGR",
+  "ROU",
+  "GRC",
+  "HRV",
+  "SVN",
+  "MNE",
+  "AUT",
+  "BEL",
+  "DEU",
+  "DNK",
+  "ESP",
+  "FIN",
+  "FRA",
+  "IRL",
+  "ITA",
+  "LUX",
+  "NLD",
+  "PRT",
+  "SWE"
+] as const;
+
 export class TedClient {
   private readonly baseUrl: URL;
   private readonly fetcher: Fetcher;
@@ -140,16 +176,50 @@ export function buildBulgarianSoftwareTedQuery(
   publicationDateFrom: string,
   publicationDateTo = publicationDateFrom
 ): string {
-  const cpvFilter = TED_SOFTWARE_CPV_PREFIXES.map(
-    (prefix) => `classification-cpv = ${prefix}*`
-  ).join(" OR ");
+  return buildTedIctQuery({
+    buyerCountryCodes: ["BGR"],
+    publicationDateFrom,
+    publicationDateTo,
+    cpvPrefixes: TED_SOFTWARE_CPV_PREFIXES
+  });
+}
+
+export function buildTedIctQuery({
+  buyerCountryCodes,
+  publicationDateFrom,
+  publicationDateTo = publicationDateFrom,
+  cpvPrefixes = TED_ICT_CPV_PREFIXES
+}: {
+  buyerCountryCodes: readonly string[];
+  publicationDateFrom: string;
+  publicationDateTo?: string;
+  cpvPrefixes?: readonly string[];
+}): string {
+  const normalizedBuyerCountryCodes = normalizeTedBuyerCountryCodes(buyerCountryCodes);
+  const cpvFilter = [...new Set(cpvPrefixes)]
+    .map((prefix) => `classification-cpv = ${prefix}*`)
+    .join(" OR ");
+  const buyerCountryFilter =
+    normalizedBuyerCountryCodes.length === 1
+      ? `buyer-country = ${normalizedBuyerCountryCodes[0]}`
+      : `buyer-country IN (${normalizedBuyerCountryCodes.join(" ")})`;
   const filters = [
     `(${cpvFilter})`,
-    "buyer-country = BGR",
+    buyerCountryFilter,
     `publication-date >= ${publicationDateFrom}`,
     `publication-date <= ${publicationDateTo}`,
     "notice-type IN (cn-standard cn-social)"
   ];
 
   return `${filters.join(" AND ")} SORT BY publication-date DESC`;
+}
+
+function normalizeTedBuyerCountryCodes(values: readonly string[]): string[] {
+  const countryCodes = values
+    .map((value) => value.trim().toUpperCase())
+    .filter((value) => /^[A-Z]{3}$/.test(value));
+
+  return countryCodes.length > 0
+    ? [...new Set(countryCodes)]
+    : [...DEFAULT_TED_MARKET_COUNTRY_CODES];
 }

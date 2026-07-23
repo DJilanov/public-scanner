@@ -301,20 +301,55 @@ const DEFAULT_PIPELINE_MARKET_SCOPE: PipelineMarketScope = {
 const INTERNATIONAL_SOURCES = SOURCE_CATALOG.filter((source) => source.isInternational);
 const COUNTRY_NAMES_BG: Record<SupportedCountryCode, string> = {
   AL: "Албания",
+  AT: "Австрия",
   AU: "Австралия",
   BA: "Босна и Херцеговина",
+  BE: "Белгия",
   BG: "България",
   CA: "Канада",
+  DE: "Германия",
+  DK: "Дания",
+  ES: "Испания",
+  FI: "Финландия",
+  FR: "Франция",
   GB: "Великобритания",
   GR: "Гърция",
   HR: "Хърватия",
+  IE: "Ирландия",
+  IT: "Италия",
+  LU: "Люксембург",
   ME: "Черна гора",
   MK: "Северна Македония",
+  NL: "Нидерландия",
+  PT: "Португалия",
   RO: "Румъния",
   RS: "Сърбия",
+  SE: "Швеция",
   SI: "Словения",
   US: "САЩ"
 };
+
+const TED_COVERED_MARKETS: SupportedCountryCode[] = [
+  "BG",
+  "RO",
+  "GR",
+  "HR",
+  "SI",
+  "ME",
+  "AT",
+  "BE",
+  "DE",
+  "DK",
+  "ES",
+  "FI",
+  "FR",
+  "IE",
+  "IT",
+  "LU",
+  "NL",
+  "PT",
+  "SE"
+];
 
 const EMPTY_DASHBOARD: ProcurementDashboard = {
   pipeline: [],
@@ -549,6 +584,7 @@ const TRANSLATIONS = {
     market: "Market",
     homeMarket: "Home market",
     balkanMarkets: "Regional markets",
+    westernEuMarkets: "Western Europe markets",
     globalMarkets: "Global markets",
     allSelectedMarkets: "All selected markets",
     internationalMarket: "International",
@@ -600,6 +636,9 @@ const TRANSLATIONS = {
     sourcesTitle: "Source Health",
     sourcesBody:
       "Monitor ingestion freshness, failed records, recent parser errors, and source coverage.",
+    sourceActiveFetcher: "Active fetcher",
+    sourceTedCoverage: "TED high-value coverage; national connector planned",
+    sourcePlannedConnector: "National connector planned",
     activeBids: "Active bids",
     documentRisks: "Document risks",
     sourceProblems: "Source problems",
@@ -920,6 +959,7 @@ const TRANSLATIONS = {
     market: "Пазар",
     homeMarket: "Основен пазар",
     balkanMarkets: "Регионални пазари",
+    westernEuMarkets: "Пазари в Западна Европа",
     globalMarkets: "Глобални пазари",
     allSelectedMarkets: "Всички избрани пазари",
     internationalMarket: "Международен",
@@ -972,6 +1012,10 @@ const TRANSLATIONS = {
     sourcesTitle: "Състояние на източници",
     sourcesBody:
       "Следи свежест на данните, неуспешни записи, последни грешки при парсване и покритие на източниците.",
+    sourceActiveFetcher: "Активен fetcher",
+    sourceTedCoverage:
+      "TED покритие за високи стойности; националният connector е планиран",
+    sourcePlannedConnector: "Планиран национален connector",
     activeBids: "Активни участия",
     documentRisks: "Документни рискове",
     sourceProblems: "Проблеми с източници",
@@ -4615,6 +4659,7 @@ function SourcesPage({
                 <tr key={source.source}>
                   <td>
                     <span className="source-pill">{formatSourceLabel(source)}</span>
+                    <span>{formatSourceConnectorCoverage(source, locale)}</span>
                   </td>
                   <td>{formatSourceRunStatus(source.status, locale)}</td>
                   <td>{formatDate(source.finishedAt ?? source.startedAt, locale)}</td>
@@ -6428,11 +6473,14 @@ function getCountryGroups(locale: Locale): Array<{
       countries: SUPPORTED_COUNTRIES.filter((country) => country.region === "balkans")
     },
     {
+      id: "western-europe",
+      label: t(locale, "westernEuMarkets"),
+      countries: SUPPORTED_COUNTRIES.filter((country) => country.region === "eu")
+    },
+    {
       id: "global",
       label: t(locale, "globalMarkets"),
-      countries: SUPPORTED_COUNTRIES.filter(
-        (country) => country.region === "eu" || country.region === "global"
-      )
+      countries: SUPPORTED_COUNTRIES.filter((country) => country.region === "global")
     }
   ].filter((group) => group.countries.length > 0);
 }
@@ -7822,6 +7870,19 @@ function formatSourceRunStatus(
 
 function formatSourceLabel(source: SourceHealthItem): string {
   return source.sourceDisplayName ?? source.source;
+}
+
+function formatSourceConnectorCoverage(source: SourceHealthItem, locale: Locale): string {
+  if (source.source === "bg-cais-eop" || source.source === "eu-ted") {
+    return t(locale, "sourceActiveFetcher");
+  }
+
+  const catalogItem = SOURCE_CATALOG.find((item) => item.id === source.source);
+  if (catalogItem?.countryCode && TED_COVERED_MARKETS.includes(catalogItem.countryCode)) {
+    return t(locale, "sourceTedCoverage");
+  }
+
+  return t(locale, "sourcePlannedConnector");
 }
 
 function formatOpportunitySourceLabel(opportunity: Opportunity): string {
