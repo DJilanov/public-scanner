@@ -22,15 +22,17 @@ import type {
   NormalizedOpportunityLot,
   Opportunity,
   OpportunityDetail,
+  OpportunityKind,
   OpportunityLot,
   OpportunityStatus,
   PipelineDashboardItem,
   ProcurementDashboard,
   ProfileFitScore,
+  ProcurementSource,
   SourceHealthItem,
+  SupportedCountryCode,
   SupplierDashboardItem,
-  SavedOpportunityState,
-  ProcurementSource
+  SavedOpportunityState
 } from "@public-scanner/domain";
 import type { QueryResultRow } from "pg";
 
@@ -80,6 +82,11 @@ export interface OpportunityListFilters {
   profileIds?: BusinessProfileId[];
   status?: OpportunityStatus;
   source?: ProcurementSource;
+  sourceIds?: string[];
+  countryCodes?: SupportedCountryCode[];
+  includeInternationalSources?: boolean;
+  selectedInternationalSourceIds?: string[];
+  opportunityKinds?: OpportunityKind[];
   search?: string;
   buyer?: string;
   cpvPrefix?: string;
@@ -91,7 +98,7 @@ export interface OpportunityRepositoryPort {
   list(filters?: OpportunityListFilters): Promise<Opportunity[]>;
   getById(id: string): Promise<Opportunity | undefined>;
   getDetailById?(id: string): Promise<OpportunityDetail | undefined>;
-  getDashboard?(): Promise<ProcurementDashboard>;
+  getDashboard?(filters?: OpportunityListFilters): Promise<ProcurementDashboard>;
   savePipelineState?(
     opportunityId: string,
     input: PipelineStateInput
@@ -153,12 +160,18 @@ export interface UserPreferences {
   locale: UserLocalePreference;
   theme: UserThemePreference;
   selectedProfileIds: BusinessProfileId[];
+  selectedCountryCodes: SupportedCountryCode[];
+  includeInternationalSources: boolean;
+  selectedInternationalSourceIds: string[];
 }
 
 export interface UserPreferencesInput {
   locale?: UserLocalePreference;
   theme?: UserThemePreference;
   selectedProfileIds?: BusinessProfileId[];
+  selectedCountryCodes?: SupportedCountryCode[];
+  includeInternationalSources?: boolean;
+  selectedInternationalSourceIds?: string[];
 }
 
 export interface AuthRepositoryPort {
@@ -179,6 +192,11 @@ export interface IngestionWriteResult {
 export interface OpportunityRow extends QueryResultRow {
   id: string;
   source: ProcurementSource;
+  source_id: string | null;
+  source_country_code: string | null;
+  place_of_performance_country_codes: string[] | null;
+  opportunity_kind: OpportunityKind | null;
+  language: string | null;
   external_id: string;
   deduplication_key: string;
   tender_id: string | null;
@@ -315,6 +333,9 @@ export interface UserPreferencesRow extends QueryResultRow {
   locale: UserLocalePreference;
   theme: UserThemePreference;
   selected_profile_ids: BusinessProfileId[];
+  selected_country_codes: SupportedCountryCode[];
+  include_international_sources: boolean;
+  selected_international_source_ids: string[];
 }
 
 export interface EvidenceItemRow extends QueryResultRow {

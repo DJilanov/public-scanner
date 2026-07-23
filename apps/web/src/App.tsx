@@ -14,7 +14,13 @@ import {
   buildDocumentPackageMarkdown,
   buildDeadlineCalendarEvent,
   buildOpportunityForecasts,
-  calculateBidEconomics
+  calculateBidEconomics,
+  DEFAULT_SELECTED_COUNTRY_CODES,
+  INTERNATIONAL_SOURCE_IDS,
+  normalizeCountryCodes,
+  normalizeSourceIds,
+  SOURCE_CATALOG,
+  SUPPORTED_COUNTRIES
 } from "@public-scanner/domain";
 import type {
   AlertChannel,
@@ -49,6 +55,7 @@ import type {
   ProfileFitScore,
   SavedOpportunityState,
   SourceHealthItem,
+  SupportedCountryCode,
   SupplierDashboardItem,
   TenderChangeTimelineItem,
   TenderClauseSeverity,
@@ -96,6 +103,15 @@ interface UserPreferences {
   locale: Locale;
   theme: ThemePreference;
   selectedProfileIds: BusinessProfileId[];
+  selectedCountryCodes: SupportedCountryCode[];
+  includeInternationalSources: boolean;
+  selectedInternationalSourceIds: string[];
+}
+
+interface MarketFilterState {
+  selectedCountryCodes: SupportedCountryCode[];
+  includeInternationalSources: boolean;
+  selectedInternationalSourceIds: string[];
 }
 
 interface LoginForm {
@@ -253,6 +269,28 @@ const DEFAULT_SELECTED_PROFILE_IDS: BusinessProfileId[] = [
   "software-development",
   "hardware-supply"
 ];
+const DEFAULT_MARKET_FILTERS: MarketFilterState = {
+  selectedCountryCodes: DEFAULT_SELECTED_COUNTRY_CODES,
+  includeInternationalSources: false,
+  selectedInternationalSourceIds: INTERNATIONAL_SOURCE_IDS
+};
+const INTERNATIONAL_SOURCES = SOURCE_CATALOG.filter((source) => source.isInternational);
+const COUNTRY_NAMES_BG: Record<SupportedCountryCode, string> = {
+  AL: "Албания",
+  AU: "Австралия",
+  BA: "Босна и Херцеговина",
+  BG: "България",
+  CA: "Канада",
+  GB: "Великобритания",
+  GR: "Гърция",
+  HR: "Хърватия",
+  ME: "Черна гора",
+  MK: "Северна Македония",
+  RO: "Румъния",
+  RS: "Сърбия",
+  SI: "Словения",
+  US: "САЩ"
+};
 
 const EMPTY_DASHBOARD: ProcurementDashboard = {
   pipeline: [],
@@ -481,6 +519,16 @@ const TRANSLATIONS = {
     sectorSelection: "Sector selection",
     sectorSelectionBody:
       "Select every sector you want to track. The dashboard will rank tenders by the best matching selected sector.",
+    marketSelection: "Market selection",
+    marketSelectionBody:
+      "Choose the countries that should appear across opportunities, buyer analysis, contracts, and source health.",
+    homeMarket: "Home market",
+    balkanMarkets: "Regional markets",
+    globalMarkets: "Global markets",
+    internationalSources: "International sources",
+    internationalSourcesBody:
+      "Allow global portals when they do not expose a selected-country signal yet.",
+    resetMarkets: "Reset markets",
     selectedCount: "selected",
     selectAtLeastOneSector: "Select at least one sector to keep the scanner useful.",
     resetDefaults: "Reset defaults",
@@ -831,6 +879,16 @@ const TRANSLATIONS = {
     sectorSelection: "Избор на сектори",
     sectorSelectionBody:
       "Избери всички сектори, които искаш да следиш. Таблото ще подрежда търговете по най-добрия избран сектор.",
+    marketSelection: "Избор на пазари",
+    marketSelectionBody:
+      "Избери държавите, които да се виждат във възможности, анализ на възложители, договори и източници.",
+    homeMarket: "Основен пазар",
+    balkanMarkets: "Регионални пазари",
+    globalMarkets: "Глобални пазари",
+    internationalSources: "Международни източници",
+    internationalSourcesBody:
+      "Разрешава глобални портали, когато още нямат ясен сигнал за избрана държава.",
+    resetMarkets: "Върни пазарите",
     selectedCount: "избрани",
     selectAtLeastOneSector: "Избери поне един сектор, за да остане скенерът полезен.",
     resetDefaults: "Върни стандартните",
@@ -1275,6 +1333,15 @@ export function App() {
   const [selectedProfileIds, setSelectedProfileIds] = useState<BusinessProfileId[]>(
     getInitialSelectedProfileIds
   );
+  const [selectedCountryCodes, setSelectedCountryCodes] = useState<
+    SupportedCountryCode[]
+  >(getInitialSelectedCountryCodes);
+  const [includeInternationalSources, setIncludeInternationalSources] = useState(
+    getInitialIncludeInternationalSources
+  );
+  const [selectedInternationalSourceIds, setSelectedInternationalSourceIds] = useState<
+    string[]
+  >(getInitialSelectedInternationalSourceIds);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [activeView, setActiveView] = useState<AppView>("overview");
   const [profiles, setProfiles] = useState<BusinessProfile[]>([]);
@@ -1328,6 +1395,27 @@ export function App() {
       JSON.stringify(selectedProfileIds)
     );
   }, [selectedProfileIds]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      "public-scanner-selected-country-codes",
+      JSON.stringify(selectedCountryCodes)
+    );
+  }, [selectedCountryCodes]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      "public-scanner-include-international-sources",
+      JSON.stringify(includeInternationalSources)
+    );
+  }, [includeInternationalSources]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      "public-scanner-selected-international-source-ids",
+      JSON.stringify(selectedInternationalSourceIds)
+    );
+  }, [selectedInternationalSourceIds]);
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -1433,6 +1521,15 @@ export function App() {
         setTheme(body.data.theme);
         setLocale(body.data.locale);
         setSelectedProfileIds(normalizeSelectedProfileIds(body.data.selectedProfileIds));
+        setSelectedCountryCodes(
+          normalizeSelectedCountryCodes(body.data.selectedCountryCodes)
+        );
+        setIncludeInternationalSources(Boolean(body.data.includeInternationalSources));
+        setSelectedInternationalSourceIds(
+          normalizeSelectedInternationalSourceIds(
+            body.data.selectedInternationalSourceIds
+          )
+        );
         setPreferencesLoaded(true);
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
@@ -1513,6 +1610,14 @@ export function App() {
     () => getOpportunityFilterProfileIds(filters.sector, profiles, selectedProfileIds),
     [filters.sector, profiles, selectedProfileIds]
   );
+  const marketFilters = useMemo(
+    () => ({
+      selectedCountryCodes,
+      includeInternationalSources,
+      selectedInternationalSourceIds
+    }),
+    [includeInternationalSources, selectedCountryCodes, selectedInternationalSourceIds]
+  );
 
   const loadOpportunities = useCallback(
     async (signal?: AbortSignal) => {
@@ -1520,7 +1625,11 @@ export function App() {
       setErrorMessage(undefined);
 
       try {
-        const requestUrl = buildOpportunityUrl(filters, opportunityProfileIds);
+        const requestUrl = buildOpportunityUrl(
+          filters,
+          opportunityProfileIds,
+          marketFilters
+        );
         opportunityRequestUrlRef.current = requestUrl;
         const response = await fetch(requestUrl, signal ? { signal } : {});
 
@@ -1555,7 +1664,7 @@ export function App() {
         );
       }
     },
-    [filters, handleUnauthenticated, locale, opportunityProfileIds]
+    [filters, handleUnauthenticated, locale, marketFilters, opportunityProfileIds]
   );
 
   const loadDashboard = useCallback(
@@ -1564,7 +1673,10 @@ export function App() {
       setDashboardErrorMessage(undefined);
 
       try {
-        const response = await fetch("/api/dashboard", signal ? { signal } : {});
+        const response = await fetch(
+          buildDashboardUrl(marketFilters),
+          signal ? { signal } : {}
+        );
 
         if (response.status === 401) {
           handleUnauthenticated();
@@ -1589,7 +1701,7 @@ export function App() {
         );
       }
     },
-    [handleUnauthenticated, locale]
+    [handleUnauthenticated, locale, marketFilters]
   );
 
   const loadApplyStudio = useCallback(
@@ -1653,7 +1765,10 @@ export function App() {
         {
           locale,
           theme,
-          selectedProfileIds
+          selectedProfileIds,
+          selectedCountryCodes,
+          includeInternationalSources,
+          selectedInternationalSourceIds
         },
         controller.signal
       );
@@ -1666,8 +1781,11 @@ export function App() {
   }, [
     authState,
     locale,
+    includeInternationalSources,
     persistPreferences,
     preferencesLoaded,
+    selectedCountryCodes,
+    selectedInternationalSourceIds,
     selectedProfileIds,
     theme
   ]);
@@ -2297,6 +2415,36 @@ export function App() {
     setSelectedProfileIds(DEFAULT_SELECTED_PROFILE_IDS);
   }, []);
 
+  const toggleSelectedCountry = useCallback((countryCode: SupportedCountryCode) => {
+    setSelectedCountryCodes((current) => {
+      if (current.includes(countryCode)) {
+        return current.length > 1
+          ? current.filter((code) => code !== countryCode)
+          : current;
+      }
+
+      return [...current, countryCode];
+    });
+  }, []);
+
+  const resetSelectedCountries = useCallback(() => {
+    setSelectedCountryCodes(DEFAULT_MARKET_FILTERS.selectedCountryCodes);
+  }, []);
+
+  const toggleInternationalSources = useCallback(() => {
+    setIncludeInternationalSources((current) => !current);
+  }, []);
+
+  const toggleSelectedInternationalSource = useCallback((sourceId: string) => {
+    setSelectedInternationalSourceIds((current) => {
+      if (current.includes(sourceId)) {
+        return current.length > 1 ? current.filter((id) => id !== sourceId) : current;
+      }
+
+      return normalizeSelectedInternationalSourceIds([...current, sourceId]);
+    });
+  }, []);
+
   const updateAlertField = useCallback(
     (key: keyof AlertForm, value: string | boolean) => {
       setAlertForm((current) => {
@@ -2798,11 +2946,18 @@ export function App() {
           locale={locale}
           errorMessage={preferenceErrorMessage}
           profiles={profiles}
+          includeInternationalSources={includeInternationalSources}
+          selectedCountryCodes={selectedCountryCodes}
           selectedProfileIds={selectedProfileIds}
+          selectedInternationalSourceIds={selectedInternationalSourceIds}
           theme={theme}
           onChangeLocale={changeLocale}
           onChangeTheme={changeTheme}
+          onResetSelectedCountries={resetSelectedCountries}
           onResetSelectedProfiles={resetSelectedProfiles}
+          onToggleInternationalSources={toggleInternationalSources}
+          onToggleSelectedCountry={toggleSelectedCountry}
+          onToggleSelectedInternationalSource={toggleSelectedInternationalSource}
           onToggleSelectedProfile={toggleSelectedProfile}
         />
       ) : null}
@@ -3219,7 +3374,7 @@ function OverviewPage({
             emptyLabel={t(locale, "noSources")}
             items={dashboard.sources.map((source) => ({
               id: source.source,
-              title: source.source,
+              title: formatSourceLabel(source),
               meta: `${formatSourceRunStatus(source.status, locale)} - ${source.recentErrorCount} ${t(locale, "recentErrors")}`
             }))}
           />
@@ -4229,7 +4384,7 @@ function SourcesPage({
               sources.map((source) => (
                 <tr key={source.source}>
                   <td>
-                    <span className="source-pill">{source.source}</span>
+                    <span className="source-pill">{formatSourceLabel(source)}</span>
                   </td>
                   <td>{formatSourceRunStatus(source.status, locale)}</td>
                   <td>{formatDate(source.finishedAt ?? source.startedAt, locale)}</td>
@@ -4353,11 +4508,18 @@ interface ProfileSettingsPageProps {
   locale: Locale;
   errorMessage: string | undefined;
   profiles: BusinessProfile[];
+  includeInternationalSources: boolean;
+  selectedCountryCodes: SupportedCountryCode[];
   selectedProfileIds: BusinessProfileId[];
+  selectedInternationalSourceIds: string[];
   theme: ThemePreference;
   onChangeLocale(locale: Locale): void;
   onChangeTheme(theme: ThemePreference): void;
+  onResetSelectedCountries(): void;
   onResetSelectedProfiles(): void;
+  onToggleInternationalSources(): void;
+  onToggleSelectedCountry(countryCode: SupportedCountryCode): void;
+  onToggleSelectedInternationalSource(sourceId: string): void;
   onToggleSelectedProfile(profileId: BusinessProfileId): void;
 }
 
@@ -4365,15 +4527,23 @@ function ProfileSettingsPage({
   locale,
   errorMessage,
   profiles,
+  includeInternationalSources,
+  selectedCountryCodes,
   selectedProfileIds,
+  selectedInternationalSourceIds,
   theme,
   onChangeLocale,
   onChangeTheme,
+  onResetSelectedCountries,
   onResetSelectedProfiles,
+  onToggleInternationalSources,
+  onToggleSelectedCountry,
+  onToggleSelectedInternationalSource,
   onToggleSelectedProfile
 }: ProfileSettingsPageProps) {
   const profileIds =
     profiles.length > 0 ? profiles.map((profile) => profile.id) : ALL_PROFILE_IDS;
+  const marketGroups = getCountryGroups(locale);
 
   return (
     <section className="content profile-page" id="profile">
@@ -4428,6 +4598,102 @@ function ProfileSettingsPage({
             </button>
           </div>
         </div>
+      </section>
+
+      <section
+        className="settings-panel market-settings"
+        aria-label={t(locale, "marketSelection")}
+      >
+        <div className="section-heading">
+          <div>
+            <h3>{t(locale, "marketSelection")}</h3>
+            <p className="muted">{t(locale, "marketSelectionBody")}</p>
+          </div>
+          <span>
+            {selectedCountryCodes.length} {t(locale, "selectedCount")}
+          </span>
+        </div>
+
+        <div className="market-group-list">
+          {marketGroups.map((group) => (
+            <div key={group.id} className="market-group">
+              <div className="section-heading">
+                <h4>{group.label}</h4>
+                <span>{group.countries.length}</span>
+              </div>
+              <div className="market-grid">
+                {group.countries.map((country) => {
+                  const selected = selectedCountryCodes.includes(country.code);
+
+                  return (
+                    <label key={country.code} className="market-card">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => onToggleSelectedCountry(country.code)}
+                      />
+                      <span
+                        className={`signal-badge ${selected ? "signal-positive" : "signal-neutral"}`}
+                      >
+                        {country.code}
+                      </span>
+                      <strong>{formatCountryName(country.code, locale)}</strong>
+                      <span>{formatCountrySourceSummary(country.code, locale)}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="market-toggle-row">
+          <div>
+            <h4>{t(locale, "internationalSources")}</h4>
+            <p className="muted">{t(locale, "internationalSourcesBody")}</p>
+          </div>
+          <button
+            type="button"
+            className="secondary-action"
+            aria-pressed={includeInternationalSources}
+            onClick={onToggleInternationalSources}
+          >
+            {includeInternationalSources ? t(locale, "enabled") : t(locale, "paused")}
+          </button>
+        </div>
+
+        {includeInternationalSources ? (
+          <div className="source-grid">
+            {INTERNATIONAL_SOURCES.map((source) => {
+              const selected = selectedInternationalSourceIds.includes(source.id);
+
+              return (
+                <label key={source.id} className="market-card compact-market-card">
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => onToggleSelectedInternationalSource(source.id)}
+                  />
+                  <span
+                    className={`signal-badge ${selected ? "signal-positive" : "signal-neutral"}`}
+                  >
+                    {selected ? t(locale, "selected") : t(locale, "notSelected")}
+                  </span>
+                  <strong>{source.displayName}</strong>
+                  <span>{formatSourceFamily(source.family, locale)}</span>
+                </label>
+              );
+            })}
+          </div>
+        ) : null}
+
+        <button
+          type="button"
+          className="secondary-action"
+          onClick={onResetSelectedCountries}
+        >
+          {t(locale, "resetMarkets")}
+        </button>
       </section>
 
       <section
@@ -4587,7 +4853,9 @@ function OpportunityTable({
                   </a>
                 </td>
                 <td>
-                  <span className="source-pill">{opportunity.source}</span>
+                  <span className="source-pill">
+                    {formatOpportunitySourceLabel(opportunity)}
+                  </span>
                   {opportunity.buyerName}
                 </td>
                 <td>{opportunity.cpvCodes.join(", ") || t(locale, "notStated")}</td>
@@ -5493,7 +5761,9 @@ function buildBidIntelligencePanels({
   const evidenceExpiry = getEvidenceExpiryCounts(relevantEvidence);
   const buyer = dashboard.buyers.find((item) => item.buyerName === opportunity.buyerName);
   const competitors = getCompetitorNamesForBuyer(dashboard, opportunity.buyerName);
-  const source = dashboard.sources.find((item) => item.source === opportunity.source);
+  const source = dashboard.sources.find(
+    (item) => item.source === (opportunity.sourceId ?? opportunity.source)
+  );
   const noBidItems = dashboard.pipeline.filter(
     (item) =>
       ["lost", "archived"].includes(item.savedState.stage) &&
@@ -5911,6 +6181,76 @@ function localText(locale: Locale, english: string, bulgarian: string): string {
   return locale === "bg" ? bulgarian : english;
 }
 
+function getCountryGroups(locale: Locale): Array<{
+  id: string;
+  label: string;
+  countries: typeof SUPPORTED_COUNTRIES;
+}> {
+  return [
+    {
+      id: "home",
+      label: t(locale, "homeMarket"),
+      countries: SUPPORTED_COUNTRIES.filter((country) => country.region === "home")
+    },
+    {
+      id: "balkans",
+      label: t(locale, "balkanMarkets"),
+      countries: SUPPORTED_COUNTRIES.filter((country) => country.region === "balkans")
+    },
+    {
+      id: "global",
+      label: t(locale, "globalMarkets"),
+      countries: SUPPORTED_COUNTRIES.filter(
+        (country) => country.region === "eu" || country.region === "global"
+      )
+    }
+  ].filter((group) => group.countries.length > 0);
+}
+
+function formatCountryName(countryCode: SupportedCountryCode, locale: Locale): string {
+  if (locale === "bg") {
+    return COUNTRY_NAMES_BG[countryCode];
+  }
+
+  return (
+    SUPPORTED_COUNTRIES.find((country) => country.code === countryCode)?.name ??
+    countryCode
+  );
+}
+
+function formatCountrySourceSummary(
+  countryCode: SupportedCountryCode,
+  locale: Locale
+): string {
+  const sourceCount = SOURCE_CATALOG.filter(
+    (source) => source.countryCode === countryCode
+  ).length;
+
+  return localText(
+    locale,
+    `${sourceCount} ${sourceCount === 1 ? "source" : "sources"}`,
+    `${sourceCount} ${sourceCount === 1 ? "източник" : "източника"}`
+  );
+}
+
+function formatSourceFamily(family: string, locale: Locale): string {
+  switch (family) {
+    case "eu":
+      return localText(locale, "European Union", "Европейски съюз");
+    case "ifis":
+      return localText(locale, "International finance", "Международно финансиране");
+    case "defence":
+      return localText(locale, "Defence", "Отбрана");
+    case "grant":
+      return localText(locale, "Grants", "Грантове");
+    case "ocds":
+      return "OCDS";
+    case "national-portal":
+    default:
+      return localText(locale, "National portal", "Национален портал");
+  }
+}
+
 function getStrategicRecommendation(
   profileRecommendation: BidRecommendation | undefined,
   score: number,
@@ -6174,7 +6514,8 @@ function dedupeStrings(values: string[]): string[] {
 
 function buildOpportunityUrl(
   filters: Filters,
-  selectedProfileIds: BusinessProfileId[]
+  selectedProfileIds: BusinessProfileId[],
+  marketFilters: MarketFilterState
 ): string {
   const params = new URLSearchParams({
     status: "open",
@@ -6183,6 +6524,7 @@ function buildOpportunityUrl(
   const normalizedProfileIds = normalizeSelectedProfileIds(selectedProfileIds);
 
   params.set("profileIds", normalizedProfileIds.join(","));
+  appendMarketQueryParams(params, marketFilters);
 
   const apiFilters = {
     search: filters.search,
@@ -6201,6 +6543,33 @@ function buildOpportunityUrl(
   }
 
   return `/api/opportunities?${params.toString()}`;
+}
+
+function buildDashboardUrl(marketFilters: MarketFilterState): string {
+  const params = new URLSearchParams();
+  appendMarketQueryParams(params, marketFilters);
+
+  return `/api/dashboard?${params.toString()}`;
+}
+
+function appendMarketQueryParams(
+  params: URLSearchParams,
+  marketFilters: MarketFilterState
+): void {
+  params.set(
+    "countryCodes",
+    normalizeSelectedCountryCodes(marketFilters.selectedCountryCodes).join(",")
+  );
+  params.set(
+    "includeInternationalSources",
+    String(marketFilters.includeInternationalSources)
+  );
+  params.set(
+    "selectedInternationalSourceIds",
+    normalizeSelectedInternationalSourceIds(
+      marketFilters.selectedInternationalSourceIds
+    ).join(",")
+  );
 }
 
 function getInitialThemePreference(): ThemePreference {
@@ -6232,6 +6601,49 @@ function getInitialSelectedProfileIds(): BusinessProfileId[] {
     return normalizeSelectedProfileIds(parsed);
   } catch {
     return DEFAULT_SELECTED_PROFILE_IDS;
+  }
+}
+
+function getInitialSelectedCountryCodes(): SupportedCountryCode[] {
+  const stored = window.localStorage.getItem("public-scanner-selected-country-codes");
+  if (!stored) {
+    return DEFAULT_MARKET_FILTERS.selectedCountryCodes;
+  }
+
+  try {
+    return normalizeSelectedCountryCodes(JSON.parse(stored) as unknown);
+  } catch {
+    return DEFAULT_MARKET_FILTERS.selectedCountryCodes;
+  }
+}
+
+function getInitialIncludeInternationalSources(): boolean {
+  const stored = window.localStorage.getItem(
+    "public-scanner-include-international-sources"
+  );
+  if (!stored) {
+    return DEFAULT_MARKET_FILTERS.includeInternationalSources;
+  }
+
+  try {
+    return Boolean(JSON.parse(stored) as unknown);
+  } catch {
+    return DEFAULT_MARKET_FILTERS.includeInternationalSources;
+  }
+}
+
+function getInitialSelectedInternationalSourceIds(): string[] {
+  const stored = window.localStorage.getItem(
+    "public-scanner-selected-international-source-ids"
+  );
+  if (!stored) {
+    return DEFAULT_MARKET_FILTERS.selectedInternationalSourceIds;
+  }
+
+  try {
+    return normalizeSelectedInternationalSourceIds(JSON.parse(stored) as unknown);
+  } catch {
+    return DEFAULT_MARKET_FILTERS.selectedInternationalSourceIds;
   }
 }
 
@@ -6299,6 +6711,30 @@ function normalizeSelectedProfileIds(value: unknown): BusinessProfileId[] {
   return selectedProfileIds.length > 0
     ? selectedProfileIds
     : DEFAULT_SELECTED_PROFILE_IDS;
+}
+
+function normalizeSelectedCountryCodes(value: unknown): SupportedCountryCode[] {
+  if (!Array.isArray(value)) {
+    return DEFAULT_MARKET_FILTERS.selectedCountryCodes;
+  }
+
+  return normalizeCountryCodes(
+    value.filter((entry): entry is string => typeof entry === "string")
+  );
+}
+
+function normalizeSelectedInternationalSourceIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return DEFAULT_MARKET_FILTERS.selectedInternationalSourceIds;
+  }
+
+  const normalized = normalizeSourceIds(
+    value.filter((entry): entry is string => typeof entry === "string")
+  ).filter((sourceId) => INTERNATIONAL_SOURCE_IDS.includes(sourceId));
+
+  return normalized.length > 0
+    ? normalized
+    : DEFAULT_MARKET_FILTERS.selectedInternationalSourceIds;
 }
 
 function normalizeFilters(value: Partial<Filters> | undefined): Filters {
@@ -7005,6 +7441,14 @@ function formatSourceRunStatus(
     case "partial":
       return locale === "bg" ? "частично" : "partial";
   }
+}
+
+function formatSourceLabel(source: SourceHealthItem): string {
+  return source.sourceDisplayName ?? source.source;
+}
+
+function formatOpportunitySourceLabel(opportunity: Opportunity): string {
+  return opportunity.sourceDisplayName ?? opportunity.sourceId ?? opportunity.source;
 }
 
 function formatGeneratedSummary(value: string, locale: Locale): string {

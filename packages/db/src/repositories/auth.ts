@@ -1,4 +1,10 @@
 import type { Queryable } from "../client.js";
+import {
+  DEFAULT_SELECTED_COUNTRY_CODES,
+  INTERNATIONAL_SOURCE_IDS,
+  normalizeCountryCodes,
+  normalizeSourceIds
+} from "@public-scanner/domain";
 import type {
   AuthRepositoryPort,
   AuthSession,
@@ -15,7 +21,10 @@ import type {
 const DEFAULT_USER_PREFERENCES: UserPreferences = {
   locale: "en",
   theme: "light",
-  selectedProfileIds: ["software-development", "hardware-supply"]
+  selectedProfileIds: ["software-development", "hardware-supply"],
+  selectedCountryCodes: DEFAULT_SELECTED_COUNTRY_CODES,
+  includeInternationalSources: false,
+  selectedInternationalSourceIds: INTERNATIONAL_SOURCE_IDS
 };
 
 export class AuthRepository implements AuthRepositoryPort {
@@ -155,12 +164,30 @@ export class AuthRepository implements AuthRepositoryPort {
           INSERT INTO user_preferences (user_id)
           VALUES ($1)
           ON CONFLICT (user_id) DO NOTHING
-          RETURNING locale, theme, selected_profile_ids
+          RETURNING
+            locale,
+            theme,
+            selected_profile_ids,
+            selected_country_codes,
+            include_international_sources,
+            selected_international_source_ids
         )
-        SELECT locale, theme, selected_profile_ids
+        SELECT
+          locale,
+          theme,
+          selected_profile_ids,
+          selected_country_codes,
+          include_international_sources,
+          selected_international_source_ids
         FROM inserted
         UNION ALL
-        SELECT locale, theme, selected_profile_ids
+        SELECT
+          locale,
+          theme,
+          selected_profile_ids,
+          selected_country_codes,
+          include_international_sources,
+          selected_international_source_ids
         FROM user_preferences
         WHERE user_id = $1
         LIMIT 1
@@ -180,7 +207,12 @@ export class AuthRepository implements AuthRepositoryPort {
     const next: UserPreferences = {
       locale: input.locale ?? current.locale,
       theme: input.theme ?? current.theme,
-      selectedProfileIds: input.selectedProfileIds ?? current.selectedProfileIds
+      selectedProfileIds: input.selectedProfileIds ?? current.selectedProfileIds,
+      selectedCountryCodes: input.selectedCountryCodes ?? current.selectedCountryCodes,
+      includeInternationalSources:
+        input.includeInternationalSources ?? current.includeInternationalSources,
+      selectedInternationalSourceIds:
+        input.selectedInternationalSourceIds ?? current.selectedInternationalSourceIds
     };
 
     const result = await this.db.query<UserPreferencesRow>(
@@ -189,17 +221,37 @@ export class AuthRepository implements AuthRepositoryPort {
           user_id,
           locale,
           theme,
-          selected_profile_ids
+          selected_profile_ids,
+          selected_country_codes,
+          include_international_sources,
+          selected_international_source_ids
         )
-        VALUES ($1, $2, $3, $4)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (user_id) DO UPDATE SET
           locale = excluded.locale,
           theme = excluded.theme,
           selected_profile_ids = excluded.selected_profile_ids,
+          selected_country_codes = excluded.selected_country_codes,
+          include_international_sources = excluded.include_international_sources,
+          selected_international_source_ids = excluded.selected_international_source_ids,
           updated_at = now()
-        RETURNING locale, theme, selected_profile_ids
+        RETURNING
+          locale,
+          theme,
+          selected_profile_ids,
+          selected_country_codes,
+          include_international_sources,
+          selected_international_source_ids
       `,
-      [userId, next.locale, next.theme, next.selectedProfileIds]
+      [
+        userId,
+        next.locale,
+        next.theme,
+        next.selectedProfileIds,
+        next.selectedCountryCodes,
+        next.includeInternationalSources,
+        next.selectedInternationalSourceIds
+      ]
     );
 
     const row = result.rows[0];
@@ -240,10 +292,20 @@ function mapAuthSessionRow(row: AuthSessionRow): AuthSession {
 }
 
 function mapUserPreferencesRow(row: UserPreferencesRow): UserPreferences {
+  const selectedInternationalSourceIds = normalizeSourceIds(
+    row.selected_international_source_ids
+  ).filter((sourceId) => INTERNATIONAL_SOURCE_IDS.includes(sourceId));
+
   return {
     locale: row.locale,
     theme: row.theme,
-    selectedProfileIds: row.selected_profile_ids
+    selectedProfileIds: row.selected_profile_ids,
+    selectedCountryCodes: normalizeCountryCodes(row.selected_country_codes),
+    includeInternationalSources: row.include_international_sources,
+    selectedInternationalSourceIds:
+      selectedInternationalSourceIds.length > 0
+        ? selectedInternationalSourceIds
+        : INTERNATIONAL_SOURCE_IDS
   };
 }
 

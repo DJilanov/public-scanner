@@ -7,6 +7,7 @@ import type {
   AuthUser,
   AuthUserInput,
   ComplianceItemUpdateInput,
+  OpportunityListFilters,
   OpportunityRepositoryPort,
   PipelineStateInput,
   UserPreferences,
@@ -138,6 +139,16 @@ const dashboard: ProcurementDashboard = {
   ]
 };
 
+const defaultInternationalSourceIds = [
+  "eu-ted",
+  "eu-sedia",
+  "opentender-ocds",
+  "worldbank",
+  "ungm",
+  "ebrd-ecepp",
+  "nato-procurement"
+];
+
 const evidenceItem: EvidenceItem = {
   id: "evidence-1",
   title: "ISO 27001 certificate",
@@ -165,10 +176,11 @@ const complianceItem: ComplianceItem = {
 };
 
 class FakeOpportunityRepository implements OpportunityRepositoryPort {
-  public lastFilters: unknown;
+  public lastFilters: OpportunityListFilters | undefined;
+  public lastDashboardFilters: OpportunityListFilters | undefined;
   public lastPipelineInput: PipelineStateInput | undefined;
 
-  public async list(filters = {}): Promise<Opportunity[]> {
+  public async list(filters: OpportunityListFilters = {}): Promise<Opportunity[]> {
     this.lastFilters = filters;
     return [opportunity];
   }
@@ -181,7 +193,10 @@ class FakeOpportunityRepository implements OpportunityRepositoryPort {
     return id === opportunity.id ? opportunityDetail : undefined;
   }
 
-  public async getDashboard(): Promise<ProcurementDashboard> {
+  public async getDashboard(
+    filters: OpportunityListFilters = {}
+  ): Promise<ProcurementDashboard> {
+    this.lastDashboardFilters = filters;
     return dashboard;
   }
 
@@ -345,7 +360,10 @@ class FakeAuthRepository implements AuthRepositoryPort {
   public preferences: UserPreferences = {
     locale: "en",
     theme: "light",
-    selectedProfileIds: ["software-development", "hardware-supply"]
+    selectedProfileIds: ["software-development", "hardware-supply"],
+    selectedCountryCodes: ["BG"],
+    includeInternationalSources: false,
+    selectedInternationalSourceIds: defaultInternationalSourceIds
   };
   public user: AuthUser | undefined;
 
@@ -421,7 +439,14 @@ class FakeAuthRepository implements AuthRepositoryPort {
     this.preferences = {
       locale: input.locale ?? this.preferences.locale,
       theme: input.theme ?? this.preferences.theme,
-      selectedProfileIds: input.selectedProfileIds ?? this.preferences.selectedProfileIds
+      selectedProfileIds: input.selectedProfileIds ?? this.preferences.selectedProfileIds,
+      selectedCountryCodes:
+        input.selectedCountryCodes ?? this.preferences.selectedCountryCodes,
+      includeInternationalSources:
+        input.includeInternationalSources ?? this.preferences.includeInternationalSources,
+      selectedInternationalSourceIds:
+        input.selectedInternationalSourceIds ??
+        this.preferences.selectedInternationalSourceIds
     };
 
     return this.preferences;
@@ -473,7 +498,7 @@ describe("api server", () => {
 
     const response = await server.inject({
       method: "GET",
-      url: "/api/opportunities?status=open&source=ted&minScore=50&limit=25&buyer=Agency&cpvPrefix=722&deadlineTo=2026-08-31&profileIds=hardware-supply,cybersecurity"
+      url: "/api/opportunities?status=open&source=ted&minScore=50&limit=25&buyer=Agency&cpvPrefix=722&deadlineTo=2026-08-31&profileIds=hardware-supply,cybersecurity&countryCodes=BG,RO&includeInternationalSources=true&selectedInternationalSourceIds=eu-ted,worldbank"
     });
 
     expect(response.statusCode).toBe(200);
@@ -484,6 +509,9 @@ describe("api server", () => {
       minScore: 50,
       limit: 25,
       profileIds: ["hardware-supply", "cybersecurity"],
+      countryCodes: ["BG", "RO"],
+      includeInternationalSources: true,
+      selectedInternationalSourceIds: ["eu-ted", "worldbank"],
       buyer: "Agency",
       cpvPrefix: "722",
       deadlineTo: "2026-08-31"
@@ -520,17 +548,24 @@ describe("api server", () => {
   });
 
   it("returns the procurement dashboard", async () => {
+    const repository = new FakeOpportunityRepository();
     const server = buildServer({
-      opportunities: new FakeOpportunityRepository()
+      opportunities: repository
     });
 
     const response = await server.inject({
       method: "GET",
-      url: "/api/dashboard"
+      url: "/api/dashboard?countryCodes=BG,GR"
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ data: dashboard });
+    expect(repository.lastDashboardFilters).toEqual({
+      profileIds: ["software-development", "hardware-supply"],
+      countryCodes: ["BG", "GR"],
+      includeInternationalSources: false,
+      selectedInternationalSourceIds: defaultInternationalSourceIds
+    });
 
     await server.close();
   });
@@ -938,7 +973,10 @@ describe("api server", () => {
       payload: {
         locale: "bg",
         theme: "dark",
-        selectedProfileIds: ["hardware-supply", "networking"]
+        selectedProfileIds: ["hardware-supply", "networking"],
+        selectedCountryCodes: ["BG", "RO"],
+        includeInternationalSources: true,
+        selectedInternationalSourceIds: ["eu-ted", "worldbank"]
       }
     });
     const invalidResponse = await server.inject({
@@ -956,13 +994,19 @@ describe("api server", () => {
     expect(initialResponse.json().data).toEqual({
       locale: "en",
       theme: "light",
-      selectedProfileIds: ["software-development", "hardware-supply"]
+      selectedProfileIds: ["software-development", "hardware-supply"],
+      selectedCountryCodes: ["BG"],
+      includeInternationalSources: false,
+      selectedInternationalSourceIds: defaultInternationalSourceIds
     });
     expect(updateResponse.statusCode).toBe(200);
     expect(updateResponse.json().data).toEqual({
       locale: "bg",
       theme: "dark",
-      selectedProfileIds: ["hardware-supply", "networking"]
+      selectedProfileIds: ["hardware-supply", "networking"],
+      selectedCountryCodes: ["BG", "RO"],
+      includeInternationalSources: true,
+      selectedInternationalSourceIds: ["eu-ted", "worldbank"]
     });
     expect(invalidResponse.statusCode).toBe(400);
 

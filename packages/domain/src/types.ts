@@ -1,5 +1,49 @@
 export type ProcurementSource = "cais-eop" | "ted" | "sedia";
 
+export type OpportunityKind =
+  "procurement" | "funding" | "framework" | "award" | "market-consultation";
+
+export type SourceFamily =
+  "national-portal" | "eu" | "ifis" | "defence" | "grant" | "ocds";
+
+export type SupportedCountryCode =
+  | "AL"
+  | "AU"
+  | "BA"
+  | "BG"
+  | "CA"
+  | "GB"
+  | "GR"
+  | "HR"
+  | "ME"
+  | "MK"
+  | "RO"
+  | "RS"
+  | "SI"
+  | "US";
+
+export interface SupportedCountry {
+  code: SupportedCountryCode;
+  name: string;
+  region: "home" | "balkans" | "eu" | "global";
+}
+
+export interface SourceCatalogItem {
+  id: string;
+  displayName: string;
+  family: SourceFamily;
+  baseUrl: string;
+  countryCode?: SupportedCountryCode;
+  legacySource?: ProcurementSource;
+  isInternational: boolean;
+  supportsDocuments: boolean;
+  supportsAwards: boolean;
+  supportsChanges: boolean;
+  requiresApiKey: boolean;
+  requiresRegistration: boolean;
+  defaultEnabled: boolean;
+}
+
 export type OpportunityStatus =
   "forthcoming" | "open" | "closed" | "awarded" | "cancelled" | "unknown";
 
@@ -70,6 +114,13 @@ export interface ProfileFitScore {
 export interface Opportunity {
   id: string;
   source: ProcurementSource;
+  sourceId?: string;
+  sourceDisplayName?: string;
+  sourceCountryCode?: SupportedCountryCode;
+  buyerCountryCode?: SupportedCountryCode;
+  placeOfPerformanceCountryCodes?: SupportedCountryCode[];
+  opportunityKind?: OpportunityKind;
+  language?: string;
   title: string;
   buyerName: string;
   status: OpportunityStatus;
@@ -86,6 +137,11 @@ export interface Opportunity {
 
 export interface NormalizedOpportunity {
   source: ProcurementSource;
+  sourceId?: string;
+  sourceCountryCode?: SupportedCountryCode;
+  placeOfPerformanceCountryCodes?: SupportedCountryCode[];
+  opportunityKind?: OpportunityKind;
+  language?: string;
   externalId: string;
   deduplicationKey: string;
   title: string;
@@ -321,7 +377,7 @@ export interface DocumentReviewItem {
 
 export interface ContractDashboardItem {
   id: string;
-  source: ProcurementSource;
+  source: string;
   title: string;
   buyerName: string;
   supplierName?: string;
@@ -358,7 +414,9 @@ export interface SupplierDashboardItem {
 }
 
 export interface SourceHealthItem {
-  source: ProcurementSource;
+  source: string;
+  sourceDisplayName?: string;
+  sourceCountryCode?: SupportedCountryCode;
   status?: SourceRunStatus;
   startedAt?: string;
   finishedAt?: string;

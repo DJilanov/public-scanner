@@ -784,8 +784,87 @@ textarea:focus-visible {
   color: var(--accent-strong);
 }
 
+.market-settings,
 .sector-settings {
   margin-bottom: 18px;
+}
+
+.market-group-list {
+  display: grid;
+  gap: 14px;
+}
+
+.market-group {
+  display: grid;
+  gap: 10px;
+}
+
+.market-group h4,
+.market-toggle-row h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.market-grid,
+.source-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.source-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.market-card {
+  display: grid;
+  gap: 8px;
+  min-height: 118px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-raised);
+  cursor: pointer;
+}
+
+.compact-market-card {
+  min-height: 132px;
+}
+
+.market-card input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.market-card:focus-within {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.market-card strong {
+  color: var(--text);
+}
+
+.market-card > span:not(.signal-badge) {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.market-toggle-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 14px;
+}
+
+.market-toggle-row .secondary-action[aria-pressed="true"] {
+  border-color: var(--accent-strong);
+  background: var(--accent-muted);
+  color: var(--accent-strong);
 }
 
 .sector-grid {
@@ -1548,6 +1627,11 @@ meter {
   .filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .market-grid,
+  .source-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 560px) {
@@ -1566,6 +1650,8 @@ meter {
   .intelligence-grid,
   .filters,
   .settings-grid,
+  .market-grid,
+  .source-grid,
   .sector-grid,
   .segmented-control,
   .auth-signal-grid,
@@ -1576,6 +1662,10 @@ meter {
   .economics-metrics,
   .package-stats,
   .save-view-form {
+    grid-template-columns: 1fr;
+  }
+
+  .market-toggle-row {
     grid-template-columns: 1fr;
   }
 

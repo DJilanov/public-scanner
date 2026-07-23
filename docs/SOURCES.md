@@ -1,5 +1,9 @@
 # Data Sources
 
+For the full multi-country expansion plan, source rollout order, country preference model,
+and connector architecture, see
+[MULTI_COUNTRY_SOURCE_EXPANSION_PLAN.md](./MULTI_COUNTRY_SOURCE_EXPANSION_PLAN.md).
+
 ## CAIS EOP / AOP Bulgaria
 
 Priority: P0

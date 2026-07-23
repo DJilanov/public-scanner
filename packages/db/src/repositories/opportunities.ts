@@ -1,4 +1,12 @@
-import { buildTenderDocumentPackage } from "@public-scanner/domain";
+import {
+  buildTenderDocumentPackage,
+  getSourceCountryCodeForLegacySource,
+  getSourceDisplayName,
+  getSourceIdForLegacySource,
+  normalizeCountryCode,
+  normalizeSourceIds,
+  SOURCE_CATALOG
+} from "@public-scanner/domain";
 import type {
   BuyerDashboardItem,
   ContractAmendmentSummary,
@@ -10,13 +18,16 @@ import type {
   Money,
   NormalizedOpportunityWithScore,
   Opportunity,
+  OpportunityKind,
   OpportunityDetail,
   OpportunityLot,
   PipelineDashboardItem,
   ProcurementDashboard,
+  ProcurementSource,
   ProfileFitScore,
   SavedOpportunityState,
   SourceHealthItem,
+  SupportedCountryCode,
   SupplierDashboardItem
 } from "@public-scanner/domain";
 import type { QueryResultRow } from "pg";
@@ -106,6 +117,8 @@ interface SupplierDashboardRow extends QueryResultRow {
 
 interface SourceHealthRow extends QueryResultRow {
   source: SourceHealthItem["source"];
+  source_display_name: string | null;
+  source_country_code: string | null;
   status: SourceHealthItem["status"] | null;
   started_at: Date | string | null;
   finished_at: Date | string | null;
@@ -144,6 +157,8 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
       values.push(filters.source);
       conditions.push(`o.source = $${values.length}`);
     }
+
+    appendMarketConditions("o", filters, conditions, values);
 
     if (filters.minScore !== undefined) {
       values.push(filters.minScore);
@@ -387,7 +402,42 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
     };
   }
 
-  public async getDashboard(): Promise<ProcurementDashboard> {
+  public async getDashboard(
+    filters: OpportunityListFilters = {}
+  ): Promise<ProcurementDashboard> {
+    const pipelineWhere = buildOpportunityWhere(filters, "o", ["s.user_key = 'default'"]);
+    const documentWhere = buildOpportunityWhere(filters, "o", [
+      `(
+        o.status IN ('forthcoming', 'open')
+        OR s.stage IN ('watching', 'reviewing', 'preparing', 'submitted')
+      )`
+    ]);
+    const contractWhere = buildOpportunityWhere(filters, "o");
+    const buyerValues: unknown[] = [];
+    const buyerOpportunityConditions: string[] = [];
+    appendDashboardOpportunityConditions(
+      "o",
+      filters,
+      buyerOpportunityConditions,
+      buyerValues
+    );
+    const buyerContractConditions: string[] = [];
+    appendDashboardOpportunityConditions(
+      "o",
+      filters,
+      buyerContractConditions,
+      buyerValues
+    );
+    const supplierValues: unknown[] = [];
+    const supplierConditions = ["c.supplier_name IS NOT NULL", "c.supplier_name <> ''"];
+    appendDashboardOpportunityConditions(
+      "o",
+      filters,
+      supplierConditions,
+      supplierValues
+    );
+    const sourceHealth = buildSourceHealthQuery(filters);
+
     const [
       pipelineResult,
       documentResult,
@@ -420,7 +470,7 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
           INNER JOIN opportunities o ON o.id = s.opportunity_id
           LEFT JOIN opportunity_matches m ON m.opportunity_id = o.id
           LEFT JOIN document_intelligence di ON di.opportunity_id = o.id
-          WHERE s.user_key = 'default'
+          ${pipelineWhere.sql}
           ORDER BY
             CASE s.stage
               WHEN 'reviewing' THEN 1
@@ -435,7 +485,8 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
             o.submission_deadline ASC NULLS LAST,
             o.publication_date DESC NULLS LAST
           LIMIT 200
-        `
+        `,
+        pipelineWhere.values
       ),
       this.db.query<DocumentReviewDashboardRow>(
         `
@@ -462,8 +513,7 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
           LEFT JOIN saved_opportunities s
             ON s.opportunity_id = o.id AND s.user_key = 'default'
           LEFT JOIN document_intelligence di ON di.opportunity_id = o.id
-          WHERE o.status IN ('forthcoming', 'open')
-             OR s.stage IN ('watching', 'reviewing', 'preparing', 'submitted')
+          ${documentWhere.sql}
           ORDER BY
             CASE coalesce(di.status, 'not-available')
               WHEN 'failed' THEN 1
@@ -475,7 +525,8 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
             o.submission_deadline ASC NULLS LAST,
             coalesce(m.score, 0) DESC
           LIMIT 250
-        `
+        `,
+        documentWhere.values
       ),
       this.db.query<ContractDashboardRow>(
         `
@@ -495,9 +546,11 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
             o.cpv_codes
           FROM contracts c
           LEFT JOIN opportunities o ON o.id = c.opportunity_id
+          ${contractWhere.sql}
           ORDER BY c.contract_date DESC NULLS LAST, c.created_at DESC
           LIMIT 250
-        `
+        `,
+        contractWhere.values
       ),
       this.db.query<BuyerDashboardRow>(
         `
@@ -512,6 +565,7 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
               array_remove(array_agg(DISTINCT cpv_code), NULL) AS top_cpv_codes
             FROM opportunities o
             LEFT JOIN LATERAL unnest(o.cpv_codes) AS cpv_code ON true
+            ${toWhereSql(buyerOpportunityConditions)}
             GROUP BY o.buyer_name
           ),
           contract_stats AS (
@@ -539,6 +593,8 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
               max(c.contract_date) AS last_contract_date,
               array_remove(array_agg(DISTINCT c.supplier_name), NULL) AS top_suppliers
             FROM contracts c
+            LEFT JOIN opportunities o ON o.id = c.opportunity_id
+            ${toWhereSql(buyerContractConditions)}
             GROUP BY c.buyer_name
           ),
           buyers AS (
@@ -565,7 +621,8 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
             coalesce(cs.contract_count, '0')::integer DESC,
             b.buyer_name ASC
           LIMIT 150
-        `
+        `,
+        buyerValues
       ),
       this.db.query<SupplierDashboardRow>(
         `
@@ -602,20 +659,20 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
               LIMIT 8
             ) AS top_cpv_codes
           FROM contracts c
-          WHERE c.supplier_name IS NOT NULL
-            AND c.supplier_name <> ''
+          LEFT JOIN opportunities o ON o.id = c.opportunity_id
+          ${toWhereSql(supplierConditions)}
           GROUP BY c.supplier_name
           ORDER BY count(*) DESC, max(c.contract_date) DESC NULLS LAST
           LIMIT 150
-        `
+        `,
+        supplierValues
       ),
       this.db.query<SourceHealthRow>(
-        `
-          WITH sources(source) AS (
-            VALUES ('cais-eop'), ('ted'), ('sedia')
-          )
+        `${sourceHealth.withSql}
           SELECT
             sources.source,
+            sources.source_display_name,
+            sources.source_country_code,
             latest.status,
             latest.started_at,
             latest.finished_at,
@@ -640,17 +697,22 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
               error_message
             FROM source_runs
             WHERE source_runs.source = sources.source
+               OR source_runs.source = sources.legacy_source
             ORDER BY started_at DESC
             LIMIT 1
           ) latest ON true
           LEFT JOIN LATERAL (
             SELECT count(*)::text AS recent_error_count
             FROM source_errors
-            WHERE source_errors.source = sources.source
+            WHERE (
+                source_errors.source = sources.source
+                OR source_errors.source = sources.legacy_source
+              )
               AND source_errors.created_at >= now() - interval '7 days'
           ) errors ON true
           ORDER BY sources.source ASC
-        `
+        `,
+        sourceHealth.values
       )
     ]);
 
@@ -714,10 +776,27 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
     opportunity: NormalizedOpportunityWithScore,
     rawDocumentId?: string
   ): Promise<UpsertOpportunityResult> {
+    const sourceId =
+      opportunity.sourceId ?? getSourceIdForLegacySource(opportunity.source);
+    const sourceCountryCode =
+      opportunity.sourceCountryCode ??
+      getSourceCountryCodeForLegacySource(opportunity.source) ??
+      null;
+    const buyerCountryCode = normalizeOptionalCountryCode(opportunity.buyerCountryCode);
+    const placeOfPerformanceCountryCodes = normalizeOptionalCountryCodes(
+      opportunity.placeOfPerformanceCountryCodes ?? []
+    );
+    const opportunityKind = opportunity.opportunityKind ?? "procurement";
+
     const result = await this.db.query<UpsertOpportunityRow>(
       `
         INSERT INTO opportunities (
           source,
+          source_id,
+          source_country_code,
+          place_of_performance_country_codes,
+          opportunity_kind,
+          language,
           external_id,
           deduplication_key,
           tender_id,
@@ -745,9 +824,14 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
         VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
           $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-          $21, $22, $23, $24
+          $21, $22, $23, $24, $25, $26, $27, $28, $29
         )
         ON CONFLICT (source, external_id) DO UPDATE SET
+          source_id = excluded.source_id,
+          source_country_code = excluded.source_country_code,
+          place_of_performance_country_codes = excluded.place_of_performance_country_codes,
+          opportunity_kind = excluded.opportunity_kind,
+          language = excluded.language,
           deduplication_key = excluded.deduplication_key,
           tender_id = excluded.tender_id,
           unique_procurement_number = excluded.unique_procurement_number,
@@ -775,6 +859,11 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
       `,
       [
         opportunity.source,
+        sourceId,
+        sourceCountryCode,
+        placeOfPerformanceCountryCodes,
+        opportunityKind,
+        opportunity.language ?? null,
         opportunity.externalId,
         opportunity.deduplicationKey,
         opportunity.tenderId ?? null,
@@ -783,7 +872,7 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
         opportunity.title,
         opportunity.buyerName,
         opportunity.buyerRegistryNumber ?? null,
-        opportunity.buyerCountryCode ?? null,
+        buyerCountryCode,
         opportunity.status,
         opportunity.mainCpvCode ?? opportunity.cpvCodes[0] ?? null,
         opportunity.cpvCodes,
@@ -838,10 +927,28 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
 
 function mapOpportunityRow(row: OpportunityRow): Opportunity {
   const profileScores = mapProfileScores(row.profile_scores);
+  const sourceId = row.source_id ?? getSourceIdForLegacySource(row.source);
+  const sourceDisplayName = getSourceDisplayName(sourceId);
+  const sourceCountryCode =
+    normalizeOptionalCountryCode(row.source_country_code) ??
+    getSourceCountryCodeForLegacySource(row.source);
+  const buyerCountryCode = normalizeOptionalCountryCode(row.buyer_country_code);
+  const placeOfPerformanceCountryCodes = normalizeOptionalCountryCodes(
+    row.place_of_performance_country_codes ?? []
+  );
 
   return {
     id: row.id,
     source: row.source,
+    sourceId,
+    ...(sourceDisplayName ? { sourceDisplayName } : {}),
+    ...(sourceCountryCode ? { sourceCountryCode } : {}),
+    ...(buyerCountryCode ? { buyerCountryCode } : {}),
+    ...(placeOfPerformanceCountryCodes.length > 0
+      ? { placeOfPerformanceCountryCodes }
+      : {}),
+    ...(row.opportunity_kind ? { opportunityKind: row.opportunity_kind } : {}),
+    ...(row.language !== null ? { language: row.language } : {}),
     deduplicationKey: row.deduplication_key,
     title: row.title,
     buyerName: row.buyer_name,
@@ -950,8 +1057,14 @@ function mapSupplierDashboardRow(row: SupplierDashboardRow): SupplierDashboardIt
 }
 
 function mapSourceHealthRow(row: SourceHealthRow): SourceHealthItem {
+  const sourceCountryCode = normalizeOptionalCountryCode(row.source_country_code);
+
   return {
     source: row.source,
+    ...(row.source_display_name !== null
+      ? { sourceDisplayName: row.source_display_name }
+      : {}),
+    ...(sourceCountryCode ? { sourceCountryCode } : {}),
     fetchedCount: row.fetched_count ?? 0,
     insertedCount: row.inserted_count ?? 0,
     updatedCount: row.updated_count ?? 0,
@@ -1116,6 +1229,270 @@ function safeStringArray(value: unknown): string[] {
   }
 
   return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+interface SqlWhere {
+  sql: string;
+  values: unknown[];
+}
+
+interface SourceHealthQuery {
+  withSql: string;
+  values: unknown[];
+}
+
+function buildOpportunityWhere(
+  filters: OpportunityListFilters,
+  alias: string,
+  baseConditions: string[] = []
+): SqlWhere {
+  const values: unknown[] = [];
+  const conditions = [...baseConditions];
+  appendDashboardOpportunityConditions(alias, filters, conditions, values);
+
+  return {
+    sql: toWhereSql(conditions),
+    values
+  };
+}
+
+function appendDashboardOpportunityConditions(
+  alias: string,
+  filters: OpportunityListFilters,
+  conditions: string[],
+  values: unknown[]
+): void {
+  if (filters.source) {
+    values.push(filters.source);
+    conditions.push(`${alias}.source = $${values.length}`);
+  }
+
+  appendMarketConditions(alias, filters, conditions, values);
+}
+
+function appendMarketConditions(
+  alias: string,
+  filters: OpportunityListFilters,
+  conditions: string[],
+  values: unknown[]
+): void {
+  const sourceIds = normalizeSourceFilterIds(filters.sourceIds);
+  if (sourceIds.length > 0) {
+    values.push(sourceIds);
+    conditions.push(`${sourceIdSql(alias)} = ANY($${values.length}::text[])`);
+  }
+
+  const countryCodes = normalizeOptionalCountryCodes(filters.countryCodes ?? []);
+  const internationalSourceIds = filters.includeInternationalSources
+    ? normalizeSourceFilterIds(
+        filters.selectedInternationalSourceIds?.length
+          ? filters.selectedInternationalSourceIds
+          : SOURCE_CATALOG.filter((source) => source.isInternational).map(
+              (source) => source.id
+            )
+      )
+    : [];
+
+  if (countryCodes.length > 0) {
+    values.push(countryCodes);
+    const countryIndex = values.length;
+    const countryConditions = [
+      `${buyerCountrySql(alias)} = ANY($${countryIndex}::text[])`,
+      `${sourceCountrySql(alias)} = ANY($${countryIndex}::text[])`,
+      `coalesce(${alias}.place_of_performance_country_codes, ARRAY[]::text[]) && $${countryIndex}::text[]`
+    ];
+
+    if (internationalSourceIds.length > 0) {
+      values.push(internationalSourceIds);
+      countryConditions.push(
+        `(
+          ${sourceIdSql(alias)} = ANY($${values.length}::text[])
+          AND ${buyerCountrySql(alias)} IS NULL
+          AND ${sourceCountrySql(alias)} IS NULL
+          AND cardinality(coalesce(${alias}.place_of_performance_country_codes, ARRAY[]::text[])) = 0
+        )`
+      );
+    }
+
+    conditions.push(`(${countryConditions.join(" OR ")})`);
+  } else if (internationalSourceIds.length > 0) {
+    values.push(internationalSourceIds);
+    conditions.push(`${sourceIdSql(alias)} = ANY($${values.length}::text[])`);
+  }
+
+  const opportunityKinds = normalizeOpportunityKinds(filters.opportunityKinds ?? []);
+  if (opportunityKinds.length > 0) {
+    values.push(opportunityKinds);
+    conditions.push(
+      `coalesce(${alias}.opportunity_kind, 'procurement') = ANY($${values.length}::text[])`
+    );
+  }
+}
+
+function toWhereSql(conditions: string[]): string {
+  return conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+}
+
+function buildSourceHealthQuery(filters: OpportunityListFilters): SourceHealthQuery {
+  const sources = getSourceHealthCatalogItems(filters);
+  if (sources.length === 0) {
+    return {
+      withSql: `
+          WITH sources(
+            source,
+            source_display_name,
+            source_country_code,
+            legacy_source
+          ) AS (
+            SELECT *
+            FROM (
+              VALUES (NULL::text, NULL::text, NULL::text, NULL::text)
+            ) AS empty_sources(source, source_display_name, source_country_code, legacy_source)
+            WHERE false
+          )`,
+      values: []
+    };
+  }
+
+  const values: unknown[] = [];
+  const rows = sources.map((source) => {
+    values.push(
+      source.id,
+      source.displayName,
+      source.countryCode ?? null,
+      source.legacySource ?? null
+    );
+    const startIndex = values.length - 3;
+
+    return `($${startIndex}::text, $${startIndex + 1}::text, $${startIndex + 2}::text, $${startIndex + 3}::text)`;
+  });
+
+  return {
+    withSql: `
+          WITH sources(
+            source,
+            source_display_name,
+            source_country_code,
+            legacy_source
+          ) AS (
+            VALUES ${rows.join(", ")}
+          )`,
+    values
+  };
+}
+
+function getSourceHealthCatalogItems(filters: OpportunityListFilters) {
+  const sourceIds = normalizeSourceFilterIds(filters.sourceIds);
+  const countryCodes = normalizeOptionalCountryCodes(filters.countryCodes ?? []);
+  const internationalSourceIds = filters.includeInternationalSources
+    ? normalizeSourceFilterIds(
+        filters.selectedInternationalSourceIds?.length
+          ? filters.selectedInternationalSourceIds
+          : SOURCE_CATALOG.filter((source) => source.isInternational).map(
+              (source) => source.id
+            )
+      )
+    : [];
+
+  let sources = SOURCE_CATALOG.filter((source) => {
+    if (sourceIds.length > 0 && !sourceIds.includes(source.id)) {
+      return false;
+    }
+
+    if (filters.source && source.legacySource !== filters.source) {
+      return false;
+    }
+
+    if (sourceIds.length > 0 || filters.source) {
+      return true;
+    }
+
+    if (countryCodes.length === 0) {
+      return source.defaultEnabled;
+    }
+
+    return (
+      (source.countryCode !== undefined && countryCodes.includes(source.countryCode)) ||
+      internationalSourceIds.includes(source.id)
+    );
+  });
+
+  if (sources.length === 0 && countryCodes.length === 0 && sourceIds.length === 0) {
+    sources = SOURCE_CATALOG.filter((source) => source.defaultEnabled);
+  }
+
+  return sources;
+}
+
+function sourceIdSql(alias: string): string {
+  return `coalesce(
+    ${alias}.source_id,
+    CASE ${alias}.source
+      WHEN 'cais-eop' THEN 'bg-cais-eop'
+      WHEN 'ted' THEN 'eu-ted'
+      WHEN 'sedia' THEN 'eu-sedia'
+      ELSE ${alias}.source
+    END
+  )`;
+}
+
+function sourceCountrySql(alias: string): string {
+  return `coalesce(
+    nullif(${alias}.source_country_code, ''),
+    CASE ${alias}.source
+      WHEN 'cais-eop' THEN 'BG'
+    END
+  )`;
+}
+
+function buyerCountrySql(alias: string): string {
+  return `nullif(${alias}.buyer_country_code, '')`;
+}
+
+function normalizeOptionalCountryCode(
+  value: string | null | undefined
+): SupportedCountryCode | undefined {
+  return value ? normalizeCountryCode(value) : undefined;
+}
+
+function normalizeOptionalCountryCodes(
+  values: readonly string[]
+): SupportedCountryCode[] {
+  const countryCodes: SupportedCountryCode[] = [];
+
+  for (const value of values) {
+    const countryCode = normalizeCountryCode(value);
+    if (countryCode && !countryCodes.includes(countryCode)) {
+      countryCodes.push(countryCode);
+    }
+  }
+
+  return countryCodes;
+}
+
+function normalizeSourceFilterIds(values: readonly string[] | undefined): string[] {
+  return normalizeSourceIds(values ?? []);
+}
+
+function normalizeOpportunityKinds(
+  values: readonly OpportunityKind[]
+): OpportunityKind[] {
+  const validKinds: OpportunityKind[] = [
+    "procurement",
+    "funding",
+    "framework",
+    "award",
+    "market-consultation"
+  ];
+  const normalized: OpportunityKind[] = [];
+
+  for (const value of values) {
+    if (validKinds.includes(value) && !normalized.includes(value)) {
+      normalized.push(value);
+    }
+  }
+
+  return normalized;
 }
 
 function normalizeDbDate(value: Date | string): string {

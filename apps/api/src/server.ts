@@ -20,6 +20,10 @@ import {
 import {
   BUSINESS_PROFILES,
   buildTenderDocumentPackage,
+  DEFAULT_SELECTED_COUNTRY_CODES,
+  INTERNATIONAL_SOURCE_IDS,
+  normalizeCountryCode,
+  normalizeSourceIds,
   type AlertChannel,
   type AlertRuleInput,
   type ApplicationStage,
@@ -32,8 +36,10 @@ import {
   type EvidenceType,
   type Opportunity,
   type OpportunityDetail,
+  type OpportunityKind,
   type OpportunityStatus,
-  type ProcurementDashboard
+  type ProcurementDashboard,
+  type SupportedCountryCode
 } from "@public-scanner/domain";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { pathToFileURL } from "node:url";
@@ -63,12 +69,18 @@ interface PreferencePayload {
   locale?: unknown;
   theme?: unknown;
   selectedProfileIds?: unknown;
+  selectedCountryCodes?: unknown;
+  includeInternationalSources?: unknown;
+  selectedInternationalSourceIds?: unknown;
 }
 
 const DEFAULT_USER_PREFERENCES: UserPreferences = {
   locale: "en",
   theme: "light",
-  selectedProfileIds: ["software-development", "hardware-supply"]
+  selectedProfileIds: ["software-development", "hardware-supply"],
+  selectedCountryCodes: DEFAULT_SELECTED_COUNTRY_CODES,
+  includeInternationalSources: false,
+  selectedInternationalSourceIds: INTERNATIONAL_SOURCE_IDS
 };
 
 const PUBLIC_API_PATHS = new Set([
@@ -270,11 +282,18 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   });
 
   server.get("/api/opportunities", async (request, reply) => {
-    const filters = parseOpportunityFilters(
+    const queryFilters = parseOpportunityFilters(
       request.query as Record<string, string | undefined>
     );
 
     try {
+      const preferences = await readRequestPreferences(auth, request.headers.cookie);
+      if (!preferences) {
+        return reply.status(401).send({ error: "Authentication required" });
+      }
+
+      const filters = applyPreferenceFilters(queryFilters, preferences);
+
       return {
         data: await opportunities.list(filters)
       };
@@ -290,11 +309,21 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   server.get("/api/dashboard", async (request, reply) => {
     try {
+      const preferences = await readRequestPreferences(auth, request.headers.cookie);
+      if (!preferences) {
+        return reply.status(401).send({ error: "Authentication required" });
+      }
+
+      const filters = applyPreferenceFilters(
+        parseOpportunityFilters(request.query as Record<string, string | undefined>),
+        preferences
+      );
+
       return {
         data: opportunities.getDashboard
-          ? await opportunities.getDashboard()
+          ? await opportunities.getDashboard(filters)
           : buildFallbackDashboard(
-              await opportunities.list({ status: "open", limit: 250 })
+              await opportunities.list({ ...filters, status: "open", limit: 250 })
             )
       };
     } catch (error) {
@@ -499,6 +528,38 @@ async function readSession(
   }
 
   return auth.findSessionByTokenHash(hashSessionToken(token));
+}
+
+async function readRequestPreferences(
+  auth: AuthRepositoryPort | undefined,
+  cookieHeader: string | undefined
+): Promise<UserPreferences | undefined> {
+  if (!auth) {
+    return DEFAULT_USER_PREFERENCES;
+  }
+
+  const session = await readSession(auth, cookieHeader);
+  return session ? auth.getPreferences(session.user.id) : undefined;
+}
+
+function applyPreferenceFilters(
+  filters: OpportunityListFilters,
+  preferences: UserPreferences
+): OpportunityListFilters {
+  return {
+    ...filters,
+    profileIds: filters.profileIds?.length
+      ? filters.profileIds
+      : preferences.selectedProfileIds,
+    countryCodes: filters.countryCodes?.length
+      ? filters.countryCodes
+      : preferences.selectedCountryCodes,
+    includeInternationalSources:
+      filters.includeInternationalSources ?? preferences.includeInternationalSources,
+    selectedInternationalSourceIds: filters.selectedInternationalSourceIds?.length
+      ? filters.selectedInternationalSourceIds
+      : preferences.selectedInternationalSourceIds
+  };
 }
 
 function parseLoginPayload(body: unknown): LoginPayload | undefined {
@@ -923,6 +984,22 @@ function parseOpportunityFilters(
   const limit = query.limit ? parsePositiveInteger(query.limit) : undefined;
   const minScore = query.minScore ? parsePositiveInteger(query.minScore) : undefined;
   const profileIds = parseBusinessProfileIds(query.profileIds);
+  const countryCodes = query.countryCodes
+    ? parseCountryCodes(query.countryCodes)
+    : undefined;
+  const sourceIds = query.sourceIds ? parseSourceIds(query.sourceIds) : undefined;
+  const selectedInternationalSourceIds = query.selectedInternationalSourceIds
+    ? parseInternationalSourceIds(query.selectedInternationalSourceIds)
+    : undefined;
+  const opportunityKinds = query.opportunityKinds
+    ? parseOpportunityKinds(query.opportunityKinds)
+    : undefined;
+  const includeInternationalSources =
+    query.includeInternationalSources === "true"
+      ? true
+      : query.includeInternationalSources === "false"
+        ? false
+        : undefined;
 
   return {
     ...(query.status && isValidStatus(query.status) ? { status: query.status } : {}),
@@ -938,7 +1015,12 @@ function parseOpportunityFilters(
       : {}),
     ...(limit !== undefined ? { limit } : {}),
     ...(minScore !== undefined ? { minScore } : {}),
-    ...(profileIds ? { profileIds } : {})
+    ...(profileIds ? { profileIds } : {}),
+    ...(countryCodes ? { countryCodes } : {}),
+    ...(sourceIds ? { sourceIds } : {}),
+    ...(includeInternationalSources !== undefined ? { includeInternationalSources } : {}),
+    ...(selectedInternationalSourceIds ? { selectedInternationalSourceIds } : {}),
+    ...(opportunityKinds ? { opportunityKinds } : {})
   };
 }
 
@@ -951,8 +1033,27 @@ function parsePreferencePayload(payload: unknown): UserPreferencesInput | undefi
   const selectedProfileIds = Array.isArray(input.selectedProfileIds)
     ? parseBusinessProfileIds(input.selectedProfileIds)
     : undefined;
+  const selectedCountryCodes =
+    input.selectedCountryCodes !== undefined
+      ? parseCountryCodes(input.selectedCountryCodes)
+      : undefined;
+  const selectedInternationalSourceIds =
+    input.selectedInternationalSourceIds !== undefined
+      ? parseInternationalSourceIds(input.selectedInternationalSourceIds)
+      : undefined;
 
   if (input.selectedProfileIds !== undefined && !selectedProfileIds) {
+    return undefined;
+  }
+
+  if (input.selectedCountryCodes !== undefined && !selectedCountryCodes) {
+    return undefined;
+  }
+
+  if (
+    input.selectedInternationalSourceIds !== undefined &&
+    !selectedInternationalSourceIds
+  ) {
     return undefined;
   }
 
@@ -964,10 +1065,22 @@ function parsePreferencePayload(payload: unknown): UserPreferencesInput | undefi
     return undefined;
   }
 
+  if (
+    input.includeInternationalSources !== undefined &&
+    typeof input.includeInternationalSources !== "boolean"
+  ) {
+    return undefined;
+  }
+
   return {
     ...(isValidLocalePreference(input.locale) ? { locale: input.locale } : {}),
     ...(isValidThemePreference(input.theme) ? { theme: input.theme } : {}),
-    ...(selectedProfileIds ? { selectedProfileIds } : {})
+    ...(selectedProfileIds ? { selectedProfileIds } : {}),
+    ...(selectedCountryCodes ? { selectedCountryCodes } : {}),
+    ...(typeof input.includeInternationalSources === "boolean"
+      ? { includeInternationalSources: input.includeInternationalSources }
+      : {}),
+    ...(selectedInternationalSourceIds ? { selectedInternationalSourceIds } : {})
   };
 }
 
@@ -996,6 +1109,91 @@ function parseBusinessProfileIds(value: unknown): BusinessProfileId[] | undefine
   }
 
   return selectedProfileIds.length > 0 ? selectedProfileIds : undefined;
+}
+
+function parseCountryCodes(value: unknown): SupportedCountryCode[] | undefined {
+  const values = parseDelimitedStringList(value);
+  if (!values || values.length === 0) {
+    return undefined;
+  }
+
+  const countryCodes: SupportedCountryCode[] = [];
+  for (const entry of values) {
+    const countryCode = normalizeCountryCode(entry);
+    if (!countryCode) {
+      return undefined;
+    }
+
+    if (!countryCodes.includes(countryCode)) {
+      countryCodes.push(countryCode);
+    }
+  }
+
+  return countryCodes.length > 0 ? countryCodes : undefined;
+}
+
+function parseSourceIds(value: unknown): string[] | undefined {
+  const values = parseDelimitedStringList(value);
+  if (!values || values.length === 0) {
+    return undefined;
+  }
+
+  const normalized = normalizeSourceIds(values);
+  return normalized.length === values.length ? normalized : undefined;
+}
+
+function parseInternationalSourceIds(value: unknown): string[] | undefined {
+  const sourceIds = parseSourceIds(value);
+  if (!sourceIds) {
+    return undefined;
+  }
+
+  return sourceIds.every((sourceId) => INTERNATIONAL_SOURCE_IDS.includes(sourceId))
+    ? sourceIds
+    : undefined;
+}
+
+function parseOpportunityKinds(value: unknown): OpportunityKind[] | undefined {
+  const values = parseDelimitedStringList(value);
+  if (!values || values.length === 0) {
+    return undefined;
+  }
+
+  const opportunityKinds: OpportunityKind[] = [];
+  for (const entry of values) {
+    if (!isValidOpportunityKind(entry)) {
+      return undefined;
+    }
+
+    if (!opportunityKinds.includes(entry)) {
+      opportunityKinds.push(entry);
+    }
+  }
+
+  return opportunityKinds.length > 0 ? opportunityKinds : undefined;
+}
+
+function parseDelimitedStringList(value: unknown): string[] | undefined {
+  const rawValues =
+    typeof value === "string" ? value.split(",") : Array.isArray(value) ? value : [];
+  const values: string[] = [];
+
+  for (const entry of rawValues) {
+    if (typeof entry !== "string") {
+      return undefined;
+    }
+
+    const normalized = entry.trim();
+    if (!normalized) {
+      continue;
+    }
+
+    if (!values.includes(normalized)) {
+      values.push(normalized);
+    }
+  }
+
+  return values;
 }
 
 function parseBusinessProfileIdsAllowEmpty(
@@ -1087,6 +1285,12 @@ function isValidLocalePreference(value: unknown): value is UserPreferences["loca
 
 function isValidThemePreference(value: unknown): value is UserPreferences["theme"] {
   return value === "light" || value === "dark";
+}
+
+function isValidOpportunityKind(value: string): value is OpportunityKind {
+  return ["procurement", "funding", "framework", "award", "market-consultation"].includes(
+    value
+  );
 }
 
 function isValidAlertChannel(value: unknown): value is AlertChannel {
