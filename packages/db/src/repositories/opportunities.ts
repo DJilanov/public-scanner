@@ -803,6 +803,7 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
           unique_procurement_number,
           publication_number,
           title,
+          description,
           buyer_name,
           buyer_registry_number,
           buyer_country_code,
@@ -824,7 +825,7 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
         VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
           $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-          $21, $22, $23, $24, $25, $26, $27, $28, $29
+          $21, $22, $23, $24, $25, $26, $27, $28, $29, $30
         )
         ON CONFLICT (source, external_id) DO UPDATE SET
           source_id = excluded.source_id,
@@ -837,6 +838,7 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
           unique_procurement_number = excluded.unique_procurement_number,
           publication_number = excluded.publication_number,
           title = excluded.title,
+          description = excluded.description,
           buyer_name = excluded.buyer_name,
           buyer_registry_number = excluded.buyer_registry_number,
           buyer_country_code = excluded.buyer_country_code,
@@ -870,6 +872,7 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
         opportunity.uniqueProcurementNumber ?? null,
         opportunity.publicationNumber ?? null,
         opportunity.title,
+        opportunity.description ?? null,
         opportunity.buyerName,
         opportunity.buyerRegistryNumber ?? null,
         buyerCountryCode,
@@ -951,6 +954,7 @@ function mapOpportunityRow(row: OpportunityRow): Opportunity {
     ...(row.language !== null ? { language: row.language } : {}),
     deduplicationKey: row.deduplication_key,
     title: row.title,
+    ...(row.description !== null ? { description: row.description } : {}),
     buyerName: row.buyer_name,
     status: row.status,
     cpvCodes: row.cpv_codes,

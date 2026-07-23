@@ -33,9 +33,27 @@ export const SEDIA_DISPLAY_FIELDS = [
   "status",
   "startDate",
   "deadlineDate",
+  "deadlineModel",
   "caName",
   "url",
-  "language"
+  "urlExternal",
+  "urlExternalTarget",
+  "language",
+  "description",
+  "programmes",
+  "frameworkProgramme",
+  "programmePeriod",
+  "programmeDivision",
+  "contractType",
+  "procedureType",
+  "typesOfAction",
+  "cftId",
+  "cftBusinessIdentifier",
+  "cftProcedureIdentifier",
+  "cftProcedureTypeCode",
+  "cftSubmissionMethodCode",
+  "topicAbbreviation",
+  "placesOfDeliveryOrPerformance"
 ] as const;
 export const DEFAULT_SEDIA_ICT_SEARCH_TERMS = [
   "software",

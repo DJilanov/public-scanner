@@ -302,9 +302,14 @@ describe("worker ingestion", () => {
               metadata: {
                 identifier: ["sedia-ref"],
                 title: ["Cloud software platform"],
+                description: ["Secure cloud software implementation and support."],
                 deadlineDate: ["2026-08-10T17:00:59.000+0000"],
                 startDate: ["2026-07-22T00:00:00.000+0000"],
                 language: ["en"],
+                procedureType: ["47396220"],
+                contractType: ["31095499"],
+                cftSubmissionMethodCode: ["ESUBMISSION"],
+                programmePeriod: ["2021 - 2027"],
                 type: ["0"]
               }
             }
@@ -332,9 +337,25 @@ describe("worker ingestion", () => {
       sourceId: "eu-sedia",
       externalId: "sedia-ref",
       title: "Cloud software platform",
+      description: "Secure cloud software implementation and support.",
       buyerName: "EU Funding & Tenders",
-      status: "open"
+      status: "open",
+      procedureType: "Procedure 47396220; Contract 31095499; Submission ESUBMISSION",
+      europeanProgram: "2021 - 2027"
     });
+    expect(store.opportunities[0]?.match.score).toBeGreaterThan(0);
+    expect(store.opportunities[0]?.match.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "profile.software-development.relevance",
+          label: expect.stringContaining("keyword: software")
+        }),
+        expect.objectContaining({
+          code: "profile.software-development.execution",
+          label: expect.stringContaining("days remain")
+        })
+      ])
+    );
   });
 
   it("builds TED queries for configured regional and western markets", async () => {

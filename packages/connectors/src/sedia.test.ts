@@ -40,6 +40,8 @@ describe("SediaClient", () => {
     expect(requestUrl?.searchParams.get("pageSize")).toBe("10");
     expect(displayFields).toContain("url");
     expect(displayFields).toContain("deadlineDate");
+    expect(displayFields).toContain("description");
+    expect(displayFields).toContain("cftSubmissionMethodCode");
     expect(response.results).toEqual([{ reference: "sedia-ref" }]);
   });
 

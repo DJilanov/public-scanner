@@ -135,6 +135,7 @@ export interface Opportunity {
   opportunityKind?: OpportunityKind;
   language?: string;
   title: string;
+  description?: string;
   buyerName: string;
   status: OpportunityStatus;
   cpvCodes: string[];
@@ -158,6 +159,7 @@ export interface NormalizedOpportunity {
   externalId: string;
   deduplicationKey: string;
   title: string;
+  description?: string;
   buyerName: string;
   status: OpportunityStatus;
   cpvCodes: string[];

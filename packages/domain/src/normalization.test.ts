@@ -185,8 +185,15 @@ describe("normalization", () => {
           ],
           startDate: ["2026-07-23T00:00:00.000+0000"],
           deadlineDate: ["2026-09-01T17:00:59.000+0000"],
+          description: [
+            "Acquisition of quantum <b>computing</b>, cloud, and data processing capacity."
+          ],
           language: ["en"],
           type: ["0"],
+          procedureType: ["47396220"],
+          contractType: ["31095499"],
+          cftSubmissionMethodCode: ["ESUBMISSION"],
+          programmePeriod: ["2021 - 2027"],
           url: [
             "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/tender-details/69b193d7-f301-438d-8be9-726e790a2aca-CN"
           ]
@@ -201,11 +208,14 @@ describe("normalization", () => {
       opportunityKind: "procurement",
       externalId: "69b193d7-f301-438d-8be9-726e790a2aca-CN",
       deduplicationKey: "sedia:69b193d7-f301-438d-8be9-726e790a2aca-CN",
+      description:
+        "Acquisition of quantum computing, cloud, and data processing capacity.",
       buyerName: "EU Funding & Tenders",
       status: "open",
       isEuFunded: true,
       language: "en",
-      procedureType: "0"
+      procedureType: "Procedure 47396220; Contract 31095499; Submission ESUBMISSION",
+      europeanProgram: "2021 - 2027"
     });
   });
 

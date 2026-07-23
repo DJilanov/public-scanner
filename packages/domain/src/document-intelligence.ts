@@ -50,13 +50,17 @@ function buildEligibilityCriteria(opportunity: NormalizedOpportunityWithScore): 
   }
 
   if (
-    containsText(opportunity.title, [
+    containsOpportunityText(opportunity, [
       "support",
       "maintenance",
       "\u043f\u043e\u0434\u0434\u0440\u044a\u0436\u043a\u0430"
     ])
   ) {
     criteria.add("Support scope: confirm SLA, response times, and coverage hours.");
+  }
+
+  if (opportunity.source === "sedia") {
+    criteria.add("SEDIA tender: verify eSubmission access and EU portal role setup.");
   }
 
   return [...criteria];
@@ -79,11 +83,34 @@ function buildRequiredDocuments(opportunity: NormalizedOpportunityWithScore): st
   }
 
   if (
-    containsCpvPrefix(opportunity.cpvCodes, ["722", "723", "724", "726", "727", "728"])
+    containsOpportunityText(opportunity, [
+      "hardware",
+      "computer",
+      "supercomputer",
+      "server",
+      "workstation"
+    ])
+  ) {
+    documents.add("Manufacturer datasheets, warranty statement, and delivery schedule.");
+  }
+
+  if (
+    containsCpvPrefix(opportunity.cpvCodes, ["722", "723", "724", "726", "727", "728"]) ||
+    containsOpportunityText(opportunity, [
+      "software",
+      "cloud",
+      "data processing",
+      "integration",
+      "maintenance"
+    ])
   ) {
     documents.add(
       "Team CVs, delivery methodology, implementation plan, and acceptance plan."
     );
+  }
+
+  if (opportunity.source === "sedia") {
+    documents.add("EU Funding & Tenders portal registration and eSubmission mandate.");
   }
 
   return [...documents];
@@ -99,7 +126,7 @@ function buildCertificationSignals(
   }
 
   if (
-    containsText(opportunity.title, [
+    containsOpportunityText(opportunity, [
       "quality",
       "\u043a\u0430\u0447\u0435\u0441\u0442\u0432\u043e"
     ])
@@ -110,6 +137,30 @@ function buildCertificationSignals(
   }
 
   if (containsCpvPrefix(opportunity.cpvCodes, ["302", "324", "325", "488"])) {
+    certifications.add(
+      "Vendor authorization, warranty service rights, or partner status may be requested."
+    );
+  }
+
+  if (
+    containsOpportunityText(opportunity, [
+      "cyber",
+      "security",
+      "cloud",
+      "data processing"
+    ])
+  ) {
+    certifications.add("ISO 27001 or equivalent security controls may be requested.");
+  }
+
+  if (
+    containsOpportunityText(opportunity, [
+      "hardware",
+      "computer",
+      "supercomputer",
+      "server"
+    ])
+  ) {
     certifications.add(
       "Vendor authorization, warranty service rights, or partner status may be requested."
     );
@@ -144,6 +195,12 @@ function buildRiskSignals(
     risks.add("Estimated value is missing; commercial fit needs manual review.");
   }
 
+  if (opportunity.source === "sedia") {
+    risks.add(
+      "SEDIA list metadata is enriched but official tender documents still need manual review."
+    );
+  }
+
   if (bestProfile && bestProfile.recommendation === "need-partner") {
     risks.add("Profile score suggests partner capacity may be needed.");
   }
@@ -171,6 +228,13 @@ function containsCpvPrefix(
 function containsText(value: string, needles: readonly string[]): boolean {
   const normalized = value.toLocaleLowerCase("bg-BG");
   return needles.some((needle) => normalized.includes(needle.toLocaleLowerCase("bg-BG")));
+}
+
+function containsOpportunityText(
+  opportunity: NormalizedOpportunityWithScore,
+  needles: readonly string[]
+): boolean {
+  return containsText(`${opportunity.title} ${opportunity.description ?? ""}`, needles);
 }
 
 function getDaysUntil(deadline: Date, now: Date): number {

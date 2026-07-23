@@ -175,6 +175,7 @@ export function normalizeSediaResultRecord(
 
   const metadata = isRecord(record.metadata) ? record.metadata : {};
   const externalId =
+    readFirstNestedField(record, metadata, "cftId") ??
     readFirstNestedField(record, metadata, "identifier") ??
     readString(record.reference) ??
     readFirstNestedField(record, metadata, "REFERENCE") ??
@@ -187,6 +188,7 @@ export function normalizeSediaResultRecord(
   const sourceUrl =
     readFirstNestedField(record, metadata, "url") ??
     readFirstNestedField(record, metadata, "esST_URL") ??
+    readFirstNestedField(record, metadata, "urlExternal") ??
     readString(record.url);
 
   if (!externalId || !title || !sourceUrl) {
@@ -205,7 +207,15 @@ export function normalizeSediaResultRecord(
   );
   const language =
     readFirstNestedField(record, metadata, "language") ?? readString(record.language);
-  const procedureType = readFirstNestedField(record, metadata, "type");
+  const description = normalizeWhitespace(
+    stripHtml(
+      readFirstNestedField(record, metadata, "description") ??
+        readString(record.summary) ??
+        readString(record.content)
+    )
+  );
+  const procedureType = buildSediaProcedureSummary(record, metadata);
+  const europeanProgram = buildSediaProgrammeSummary(record, metadata);
 
   return {
     source: "sedia",
@@ -214,6 +224,7 @@ export function normalizeSediaResultRecord(
     externalId,
     deduplicationKey: `sedia:${externalId}`,
     title,
+    ...(description ? { description } : {}),
     buyerName:
       authorityName &&
       authorityName.toLocaleLowerCase("en-US") !== title.toLocaleLowerCase("en-US")
@@ -229,7 +240,8 @@ export function normalizeSediaResultRecord(
     ...(language ? { language } : {}),
     ...(publicationDate ? { publicationDate } : {}),
     ...(submissionDeadline ? { submissionDeadline } : {}),
-    ...(procedureType ? { procedureType } : {})
+    ...(procedureType ? { procedureType } : {}),
+    ...(europeanProgram ? { europeanProgram } : {})
   };
 }
 
@@ -416,6 +428,7 @@ export function buildScoringInput(
   return {
     title: opportunity.title,
     cpvCodes: opportunity.cpvCodes,
+    ...(opportunity.description ? { description: opportunity.description } : {}),
     ...(opportunity.submissionDeadline
       ? { submissionDeadline: new Date(opportunity.submissionDeadline) }
       : {}),
@@ -553,12 +566,64 @@ function readFirstNestedField(
   return readFirstField(metadata, key) ?? readFirstField(record, key);
 }
 
+function readNestedFieldStrings(
+  record: Record<string, unknown>,
+  metadata: Record<string, unknown>,
+  key: string
+): string[] {
+  return [...readFieldStrings(metadata, key), ...readFieldStrings(record, key)];
+}
+
+function buildSediaProcedureSummary(
+  record: Record<string, unknown>,
+  metadata: Record<string, unknown>
+): string | undefined {
+  const parts = [
+    ...readNestedFieldStrings(record, metadata, "procedureType").map(
+      (value) => `Procedure ${value}`
+    ),
+    ...readNestedFieldStrings(record, metadata, "contractType").map(
+      (value) => `Contract ${value}`
+    ),
+    ...readNestedFieldStrings(record, metadata, "cftSubmissionMethodCode").map(
+      (value) => `Submission ${value}`
+    ),
+    ...readNestedFieldStrings(record, metadata, "cftProcedureTypeCode").map(
+      (value) => `Procedure code ${value}`
+    )
+  ];
+
+  return dedupeStrings(parts).join("; ") || undefined;
+}
+
+function buildSediaProgrammeSummary(
+  record: Record<string, unknown>,
+  metadata: Record<string, unknown>
+): string | undefined {
+  const parts = [
+    ...readNestedFieldStrings(record, metadata, "frameworkProgramme"),
+    ...readNestedFieldStrings(record, metadata, "programmes"),
+    ...readNestedFieldStrings(record, metadata, "programmePeriod"),
+    ...readNestedFieldStrings(record, metadata, "programmeDivision"),
+    ...readNestedFieldStrings(record, metadata, "typesOfAction")
+  ];
+
+  return dedupeStrings(parts).join(", ") || undefined;
+}
+
+function dedupeStrings(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
 function stripHtml(value: string | undefined): string | undefined {
   return value?.replace(/<[^>]*>/g, " ");
 }
 
 function normalizeWhitespace(value: string | undefined): string | undefined {
-  const normalized = value?.replace(/\s+/g, " ").trim();
+  const normalized = value
+    ?.replace(/\s+/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .trim();
   return normalized ? normalized : undefined;
 }
 

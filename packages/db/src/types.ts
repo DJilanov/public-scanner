@@ -203,6 +203,7 @@ export interface OpportunityRow extends QueryResultRow {
   unique_procurement_number: string | null;
   publication_number: string | null;
   title: string;
+  description: string | null;
   buyer_name: string;
   buyer_registry_number: string | null;
   buyer_country_code: string | null;

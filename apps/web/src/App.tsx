@@ -489,6 +489,7 @@ const TRANSLATIONS = {
       "Open a row to preview score, checklist, history, and bid stage.",
     tenderPreview: "Tender preview",
     officialNotice: "Official notice",
+    sourceSummary: "Source summary",
     scoreBreakdown: "Score Breakdown",
     noSignal: "No signal",
     noProfileScore: "No profile score is available for",
@@ -864,6 +865,7 @@ const TRANSLATIONS = {
     selectOpportunityBody: "Отвори ред, за да видиш резултат, списък, история и етап.",
     tenderPreview: "Преглед на търг",
     officialNotice: "Официално обявление",
+    sourceSummary: "Резюме от източника",
     scoreBreakdown: "Разбивка на резултата",
     noSignal: "Няма сигнал",
     noProfileScore: "Няма резултат за профил",
@@ -5335,6 +5337,13 @@ function OpportunityPreview({
           {t(locale, "downloadDocumentBrief")}
         </button>
       </div>
+
+      {detail.opportunity.description ? (
+        <section className="source-summary" aria-label={t(locale, "sourceSummary")}>
+          <strong>{t(locale, "sourceSummary")}</strong>
+          <p>{detail.opportunity.description}</p>
+        </section>
+      ) : null}
 
       <DecisionSummary
         decision={bidDecision}
