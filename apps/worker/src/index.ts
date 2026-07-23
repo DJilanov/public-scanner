@@ -3,11 +3,14 @@ import {
   CaisOpenDataClient,
   DEFAULT_TED_MARKET_COUNTRY_CODES,
   DEFAULT_SEDIA_ICT_SEARCH_TERMS,
+  DeepSeekClient,
   SEDIA_DISPLAY_FIELDS,
   SediaClient,
   TED_SOFTWARE_FIELDS,
   TedClient,
   type CaisOpenDataFile,
+  type DeepSeekTenderAnalysis,
+  type DeepSeekTenderAnalysisRequest,
   type SediaSearchResponse,
   type TedSearchResponse
 } from "@public-scanner/connectors";
@@ -21,6 +24,7 @@ import {
   normalizeCountryCodes,
   normalizeTedNoticeRecord,
   scoreNormalizedOpportunity,
+  type DocumentIntelligence,
   type NormalizedContract,
   type NormalizedContractAmendment,
   type NormalizedOpportunityWithScore,
@@ -85,6 +89,10 @@ export interface SediaOpportunityClient {
   ): Promise<SediaSearchResponse>;
 }
 
+export interface TenderAnalysisClient {
+  analyzeTender(request: DeepSeekTenderAnalysisRequest): Promise<DeepSeekTenderAnalysis>;
+}
+
 export interface IngestionStore {
   createSourceRun(input: SourceRunInput): Promise<string>;
   finishSourceRun(sourceRunId: string, input: SourceRunCompletionInput): Promise<void>;
@@ -125,6 +133,9 @@ export interface WorkerRunOptions {
   sediaSearchTerms?: string[];
   sediaPageSize?: number;
   sediaMaxPages?: number;
+  aiAnalyzer?: TenderAnalysisClient;
+  aiAnalysisMaxPerRun?: number;
+  aiAnalysisMinScore?: number;
   runMigrations?: boolean;
 }
 
@@ -145,6 +156,13 @@ interface IngestSourceOptions {
   sourceDate: string;
   now: Date;
   store: IngestionStore;
+  aiAnalysis?: AiAnalysisRuntime;
+}
+
+interface AiAnalysisRuntime {
+  client: TenderAnalysisClient;
+  minScore: number;
+  remaining: number;
 }
 
 interface MutableRunCounts {
@@ -168,13 +186,15 @@ export async function runOnce(options: WorkerRunOptions = {}): Promise<WorkerRun
 
   try {
     const result: WorkerRunResult = {};
+    const aiAnalysis = createAiAnalysisRuntime(options);
 
     if (options.includeCais ?? true) {
       result.cais = await ingestCais({
         sourceDate,
         now,
         store,
-        client: options.caisClient ?? new CaisOpenDataClient()
+        client: options.caisClient ?? new CaisOpenDataClient(),
+        ...(aiAnalysis ? { aiAnalysis } : {})
       });
     }
 
@@ -194,6 +214,7 @@ export async function runOnce(options: WorkerRunOptions = {}): Promise<WorkerRun
         store,
         query: tedQuery,
         client: options.tedClient ?? new TedClient(),
+        ...(aiAnalysis ? { aiAnalysis } : {}),
         ...(options.tedMaxPages !== undefined ? { maxPages: options.tedMaxPages } : {})
       });
     }
@@ -207,6 +228,7 @@ export async function runOnce(options: WorkerRunOptions = {}): Promise<WorkerRun
         store,
         searchTerms: sediaSearchTerms,
         client: options.sediaClient ?? new SediaClient(),
+        ...(aiAnalysis ? { aiAnalysis } : {}),
         ...(options.sediaPageSize !== undefined
           ? { pageSize: options.sediaPageSize }
           : {}),
@@ -286,6 +308,7 @@ export async function ingestCais(
         if (file.kind === "tenders") {
           await persistOpportunities({
             source,
+            sourceDate: options.sourceDate,
             payload,
             rawDocumentId,
             counts,
@@ -293,7 +316,8 @@ export async function ingestCais(
             normalize: (record) =>
               normalizeCaisTenderRecord(record, { now: options.now }),
             context: file.key,
-            store: options.store
+            store: options.store,
+            ...(options.aiAnalysis ? { aiAnalysis: options.aiAnalysis } : {})
           });
         } else if (file.kind === "contracts") {
           await persistContracts({
@@ -392,13 +416,15 @@ export async function ingestTed(
 
     await persistOpportunities({
       source,
+      sourceDate: options.sourceDate,
       payload: response.notices,
       rawDocumentId,
       counts,
       now: options.now,
       normalize: (record) => normalizeTedNoticeRecord(record, { now: options.now }),
       context: "ted-notice",
-      store: options.store
+      store: options.store,
+      ...(options.aiAnalysis ? { aiAnalysis: options.aiAnalysis } : {})
     });
   } catch (error) {
     counts.failedCount += 1;
@@ -501,13 +527,15 @@ export async function ingestSedia(
 
     await persistOpportunities({
       source,
+      sourceDate: options.sourceDate,
       payload: uniqueResults,
       rawDocumentId,
       counts,
       now: options.now,
       normalize: (record) => normalizeSediaResultRecord(record, { now: options.now }),
       context: "sedia-result",
-      store: options.store
+      store: options.store,
+      ...(options.aiAnalysis ? { aiAnalysis: options.aiAnalysis } : {})
     });
   }
 
@@ -658,6 +686,7 @@ class DryRunIngestionStore implements IngestionStore {
 
 async function persistOpportunities(input: {
   source: ProcurementSource;
+  sourceDate: string;
   payload: unknown;
   rawDocumentId: string;
   counts: MutableRunCounts;
@@ -665,6 +694,7 @@ async function persistOpportunities(input: {
   normalize(record: unknown): ReturnType<typeof normalizeCaisTenderRecord>;
   context: string;
   store: IngestionStore;
+  aiAnalysis?: AiAnalysisRuntime;
 }): Promise<void> {
   if (!Array.isArray(input.payload)) {
     input.counts.skippedCount += 1;
@@ -686,11 +716,21 @@ async function persistOpportunities(input: {
         scored,
         input.rawDocumentId
       );
+      const baseIntelligence = buildDocumentIntelligence(scored, {
+        now: input.now
+      });
+      const documentIntelligence = await buildAiAssistedDocumentIntelligence({
+        baseIntelligence,
+        context: input.context,
+        opportunity: scored,
+        source: input.source,
+        sourceDate: input.sourceDate,
+        store: input.store,
+        ...(input.aiAnalysis ? { aiAnalysis: input.aiAnalysis } : {})
+      });
       await input.store.upsertDocumentIntelligence?.(
         upsertResult.id,
-        buildDocumentIntelligence(scored, {
-          now: input.now
-        })
+        documentIntelligence
       );
 
       if (upsertResult.inserted) {
@@ -708,6 +748,143 @@ async function persistOpportunities(input: {
       });
     }
   }
+}
+
+async function buildAiAssistedDocumentIntelligence(input: {
+  aiAnalysis?: AiAnalysisRuntime;
+  baseIntelligence: DocumentIntelligence;
+  context: string;
+  opportunity: NormalizedOpportunityWithScore;
+  source: ProcurementSource;
+  sourceDate: string;
+  store: IngestionStore;
+}): Promise<DocumentIntelligenceInput> {
+  const bestScore = getOpportunityBestScore(input.opportunity);
+
+  if (
+    !input.aiAnalysis ||
+    input.aiAnalysis.remaining <= 0 ||
+    bestScore < input.aiAnalysis.minScore
+  ) {
+    return input.baseIntelligence;
+  }
+
+  input.aiAnalysis.remaining -= 1;
+
+  try {
+    const analysis = await input.aiAnalysis.client.analyzeTender(
+      toDeepSeekTenderAnalysisRequest(input.opportunity)
+    );
+
+    return mergeAiTenderAnalysis(input.baseIntelligence, analysis);
+  } catch (error) {
+    await recordSourceError(input.store, {
+      source: input.source,
+      sourceDate: input.sourceDate,
+      context: `${input.context}:ai-analysis`,
+      errorMessage: getErrorMessage(error),
+      payload: {
+        externalId: input.opportunity.externalId,
+        title: input.opportunity.title
+      }
+    });
+
+    return input.baseIntelligence;
+  }
+}
+
+function getOpportunityBestScore(opportunity: NormalizedOpportunityWithScore): number {
+  return opportunity.profileScores[0]?.totalScore ?? opportunity.match.score;
+}
+
+function toDeepSeekTenderAnalysisRequest(
+  opportunity: NormalizedOpportunityWithScore
+): DeepSeekTenderAnalysisRequest {
+  return {
+    title: opportunity.title,
+    buyerName: opportunity.buyerName,
+    source: opportunity.source,
+    cpvCodes: opportunity.cpvCodes,
+    ...(opportunity.description ? { description: opportunity.description } : {}),
+    ...(opportunity.estimatedValue ? { estimatedValue: opportunity.estimatedValue } : {}),
+    ...(opportunity.publicationDate
+      ? { publicationDate: opportunity.publicationDate }
+      : {}),
+    ...(opportunity.submissionDeadline
+      ? { submissionDeadline: opportunity.submissionDeadline }
+      : {}),
+    ...(opportunity.documentUrls?.length
+      ? { documentUrls: opportunity.documentUrls }
+      : {}),
+    ...(opportunity.submissionUrls?.length
+      ? { submissionUrls: opportunity.submissionUrls }
+      : {})
+  };
+}
+
+function mergeAiTenderAnalysis(
+  baseIntelligence: DocumentIntelligence,
+  analysis: DeepSeekTenderAnalysis
+): DocumentIntelligenceInput {
+  const aiRisks = [
+    ...analysis.risks,
+    ...analysis.missingData.map((item) => `Missing data: ${item}.`),
+    ...(analysis.dataConfidenceScore < 60
+      ? ["AI analysis confidence is low; verify the official documents manually."]
+      : [])
+  ];
+  const baseRisks =
+    aiRisks.length > 0
+      ? baseIntelligence.risks.filter(
+          (risk) =>
+            risk !== "No major metadata risk detected; verify against official documents."
+        )
+      : baseIntelligence.risks;
+
+  return {
+    status: "ready",
+    summary: [
+      `AI-assisted (${analysis.dataConfidenceScore}/100 confidence): ${analysis.summary}`,
+      ...(analysis.sectors.length > 0
+        ? [`Sectors: ${analysis.sectors.slice(0, 4).join(", ")}.`]
+        : []),
+      `Scores: fit ${analysis.businessFitScore}/100, readiness ${analysis.readinessScore}/100, commercial ${analysis.commercialScore}/100, complexity ${analysis.complexity}.`
+    ].join(" "),
+    eligibilityCriteria: mergeStringLists(
+      analysis.eligibilityCriteria,
+      baseIntelligence.eligibilityCriteria
+    ),
+    requiredDocuments: mergeStringLists(
+      analysis.requiredDocuments,
+      baseIntelligence.requiredDocuments
+    ),
+    certifications: mergeStringLists(
+      analysis.certifications,
+      baseIntelligence.certifications
+    ),
+    risks: mergeStringLists(aiRisks, baseRisks),
+    ...(baseIntelligence.extractedAt ? { extractedAt: baseIntelligence.extractedAt } : {})
+  };
+}
+
+function mergeStringLists(...lists: readonly string[][]): string[] {
+  const values = new Map<string, string>();
+
+  for (const list of lists) {
+    for (const item of list) {
+      const normalized = item.trim();
+      if (!normalized) {
+        continue;
+      }
+
+      const key = normalized.toLocaleLowerCase("en-US");
+      if (!values.has(key)) {
+        values.set(key, normalized);
+      }
+    }
+  }
+
+  return [...values.values()].slice(0, 12);
 }
 
 async function persistContracts(input: {
@@ -949,6 +1126,8 @@ async function runFromEnvironment(): Promise<WorkerRunResult | WorkerRunResult[]
     : undefined;
   const sediaPageSize = parsePositiveIntegerEnv("SEDIA_PAGE_SIZE");
   const sediaMaxPages = parsePositiveIntegerEnv("SEDIA_MAX_PAGES");
+  const aiAnalysisMaxPerRun = parsePositiveIntegerEnv("AI_ANALYSIS_MAX_PER_RUN");
+  const aiAnalysisMinScore = parsePositiveIntegerEnv("AI_ANALYSIS_MIN_SCORE");
   const commonOptions = {
     includeCais: parseBooleanEnv("INCLUDE_CAIS", true),
     includeTed: parseBooleanEnv("INCLUDE_TED", true),
@@ -957,7 +1136,9 @@ async function runFromEnvironment(): Promise<WorkerRunResult | WorkerRunResult[]
     sediaSearchTerms: getSediaSearchTermsFromEnvironment(),
     ...(sediaPageSize !== undefined ? { sediaPageSize } : {}),
     ...(sediaMaxPages !== undefined ? { sediaMaxPages } : {}),
-    ...(tedMaxPages !== undefined ? { tedMaxPages } : {})
+    ...(tedMaxPages !== undefined ? { tedMaxPages } : {}),
+    ...(aiAnalysisMaxPerRun !== undefined ? { aiAnalysisMaxPerRun } : {}),
+    ...(aiAnalysisMinScore !== undefined ? { aiAnalysisMinScore } : {})
   };
 
   if (sourceDates.length === 1) {
@@ -999,6 +1180,46 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function createAiAnalysisRuntime(
+  options: WorkerRunOptions
+): AiAnalysisRuntime | undefined {
+  const maxPerRun =
+    options.aiAnalysisMaxPerRun ??
+    parsePositiveIntegerEnv("AI_ANALYSIS_MAX_PER_RUN") ??
+    25;
+  const minScore =
+    options.aiAnalysisMinScore ?? parsePositiveIntegerEnv("AI_ANALYSIS_MIN_SCORE") ?? 62;
+
+  if (options.aiAnalyzer) {
+    return {
+      client: options.aiAnalyzer,
+      minScore,
+      remaining: maxPerRun
+    };
+  }
+
+  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
+  const enabled = parseBooleanEnv("AI_ANALYSIS_ENABLED", Boolean(apiKey) && !isDryRun());
+  if (!enabled || !apiKey || maxPerRun <= 0) {
+    return undefined;
+  }
+
+  const maxTokens = parsePositiveIntegerEnv("DEEPSEEK_MAX_TOKENS");
+
+  return {
+    client: new DeepSeekClient({
+      apiKey,
+      model: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash",
+      ...(process.env.DEEPSEEK_BASE_URL
+        ? { baseUrl: process.env.DEEPSEEK_BASE_URL }
+        : {}),
+      ...(maxTokens !== undefined ? { maxTokens } : {})
+    }),
+    minScore,
+    remaining: maxPerRun
+  };
 }
 
 function getSourceDatesFromEnvironment(now: Date): string[] {

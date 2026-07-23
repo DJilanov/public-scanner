@@ -43,7 +43,16 @@ module.exports = {
           process.env.SEDIA_SEARCH_TERMS ||
           "software,hardware,cybersecurity,cloud,network,data,digital,IT services",
         SEDIA_PAGE_SIZE: process.env.SEDIA_PAGE_SIZE || "50",
-        SEDIA_MAX_PAGES: process.env.SEDIA_MAX_PAGES || "3"
+        SEDIA_MAX_PAGES: process.env.SEDIA_MAX_PAGES || "3",
+        AI_ANALYSIS_ENABLED:
+          process.env.AI_ANALYSIS_ENABLED ||
+          (process.env.DEEPSEEK_API_KEY ? "true" : "false"),
+        AI_ANALYSIS_MAX_PER_RUN: process.env.AI_ANALYSIS_MAX_PER_RUN || "25",
+        AI_ANALYSIS_MIN_SCORE: process.env.AI_ANALYSIS_MIN_SCORE || "62",
+        DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
+        DEEPSEEK_MODEL: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash",
+        DEEPSEEK_BASE_URL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
+        DEEPSEEK_MAX_TOKENS: process.env.DEEPSEEK_MAX_TOKENS || "1800"
       }
     }
   ]

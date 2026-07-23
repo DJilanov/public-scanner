@@ -5,6 +5,7 @@ import type {
   NormalizedOpportunityWithScore
 } from "@public-scanner/domain";
 import type {
+  DocumentIntelligenceInput,
   IngestionWriteResult,
   SourceErrorInput,
   SourceRunCompletionInput,
@@ -21,7 +22,8 @@ import {
   type CaisDailyClient,
   type IngestionStore,
   type SediaOpportunityClient,
-  type TedNoticeClient
+  type TedNoticeClient,
+  type TenderAnalysisClient
 } from "./index.js";
 
 class MemoryIngestionStore implements IngestionStore {
@@ -31,6 +33,7 @@ class MemoryIngestionStore implements IngestionStore {
   public readonly amendments: NormalizedContractAmendment[] = [];
   public readonly sourceErrors: SourceErrorInput[] = [];
   public readonly completions: SourceRunCompletionInput[] = [];
+  public readonly documentIntelligence = new Map<string, DocumentIntelligenceInput>();
   private sourceRunSequence = 0;
 
   public async createSourceRun(_input: SourceRunInput): Promise<string> {
@@ -61,6 +64,13 @@ class MemoryIngestionStore implements IngestionStore {
       id: opportunity.externalId,
       inserted: true
     };
+  }
+
+  public async upsertDocumentIntelligence(
+    opportunityId: string,
+    input: DocumentIntelligenceInput
+  ): Promise<void> {
+    this.documentIntelligence.set(opportunityId, input);
   }
 
   public async upsertLot(
@@ -138,6 +148,124 @@ describe("worker ingestion", () => {
         score: expect.any(Number)
       }
     });
+  });
+
+  it("enriches document intelligence with injected AI analysis", async () => {
+    const store = new MemoryIngestionStore();
+    const caisClient = buildCaisClient([
+      {
+        tenderId: 572277,
+        subject: "Cloud software platform and cybersecurity support",
+        buyerName: "Public buyer",
+        mainCpvCode: "72230000",
+        estimatedValue: "250000,00",
+        currency: "EUR",
+        submissionDeadline: "2026-08-10T00:00:00.000Z"
+      }
+    ]);
+    let capturedTitle: string | undefined;
+    let capturedCpvCodes: readonly string[] = [];
+    const aiAnalyzer: TenderAnalysisClient = {
+      async analyzeTender(request) {
+        capturedTitle = request.title;
+        capturedCpvCodes = request.cpvCodes;
+
+        return {
+          summary: "Strong software and security fit with clear application path.",
+          businessFitScore: 91,
+          readinessScore: 74,
+          commercialScore: 82,
+          dataConfidenceScore: 84,
+          complexity: "medium",
+          sectors: ["software", "cybersecurity"],
+          eligibilityCriteria: ["AI eligibility: verify similar delivery references."],
+          requiredDocuments: ["AI required: technical compliance matrix."],
+          certifications: ["AI certification: ISO 27001 evidence."],
+          risks: ["AI risk: confirm SLA penalties."],
+          missingData: ["award criteria weighting"]
+        };
+      }
+    };
+
+    const result = await runOnce({
+      sourceDate: "2026-07-22",
+      now: new Date("2026-07-23T00:00:00.000Z"),
+      store,
+      caisClient,
+      includeTed: false,
+      includeSedia: false,
+      aiAnalyzer,
+      aiAnalysisMaxPerRun: 1,
+      aiAnalysisMinScore: 1
+    });
+
+    expect(result.cais).toMatchObject({
+      insertedCount: 1,
+      failedCount: 0
+    });
+    expect(capturedTitle).toBe("Cloud software platform and cybersecurity support");
+    expect(capturedCpvCodes).toEqual(["72230000"]);
+    expect(store.documentIntelligence.get("572277:main")).toMatchObject({
+      status: "ready",
+      summary: expect.stringContaining("AI-assisted (84/100 confidence)"),
+      eligibilityCriteria: expect.arrayContaining([
+        "AI eligibility: verify similar delivery references."
+      ]),
+      requiredDocuments: expect.arrayContaining([
+        "AI required: technical compliance matrix."
+      ]),
+      certifications: expect.arrayContaining(["AI certification: ISO 27001 evidence."]),
+      risks: expect.arrayContaining([
+        "AI risk: confirm SLA penalties.",
+        "Missing data: award criteria weighting."
+      ])
+    });
+  });
+
+  it("keeps ingestion successful when AI analysis fails", async () => {
+    const store = new MemoryIngestionStore();
+    const caisClient = buildCaisClient([
+      {
+        tenderId: 572277,
+        subject: "Software implementation",
+        buyerName: "Public buyer",
+        mainCpvCode: "72230000",
+        submissionDeadline: "2026-08-10T00:00:00.000Z"
+      }
+    ]);
+    const aiAnalyzer: TenderAnalysisClient = {
+      async analyzeTender() {
+        throw new Error("AI provider unavailable");
+      }
+    };
+
+    const result = await runOnce({
+      sourceDate: "2026-07-22",
+      now: new Date("2026-07-23T00:00:00.000Z"),
+      store,
+      caisClient,
+      includeTed: false,
+      includeSedia: false,
+      aiAnalyzer,
+      aiAnalysisMaxPerRun: 1,
+      aiAnalysisMinScore: 1
+    });
+
+    expect(result.cais).toMatchObject({
+      insertedCount: 1,
+      failedCount: 0
+    });
+    expect(store.documentIntelligence.get("572277:main")?.summary).toContain(
+      "Software Development fit"
+    );
+    expect(store.sourceErrors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          context: expect.stringContaining(":ai-analysis"),
+          errorMessage: "AI provider unavailable"
+        })
+      ])
+    );
   });
 
   it("ingests CAIS contracts, annexes, and OCDS lots", async () => {
