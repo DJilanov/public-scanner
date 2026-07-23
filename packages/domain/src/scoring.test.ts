@@ -111,4 +111,39 @@ describe("scoreOpportunity", () => {
     });
     expect(results[0]?.totalScore).toBeGreaterThanOrEqual(62);
   });
+
+  it("scores strong IT services titles even when source metadata has no CPV", () => {
+    const results = scoreOpportunityAcrossProfiles(
+      {
+        title: "MANAGED IT SERVICES 2026",
+        cpvCodes: [],
+        description: "Service desk, infrastructure monitoring, and managed IT support.",
+        submissionDeadline: new Date("2026-08-20T00:00:00.000Z")
+      },
+      { now: new Date("2026-07-23T00:00:00.000Z") }
+    );
+
+    expect(results[0]).toMatchObject({
+      recommendation: expect.stringMatching(/apply|review/)
+    });
+    expect(results[0]?.totalScore).toBeGreaterThanOrEqual(62);
+  });
+
+  it("scores strong IT equipment titles even when source metadata has no CPV", () => {
+    const results = scoreOpportunityAcrossProfiles(
+      {
+        title: "Supply of IT equipment for data exchange",
+        cpvCodes: [],
+        description: "Delivery and installation of computer equipment.",
+        submissionDeadline: new Date("2026-08-20T00:00:00.000Z")
+      },
+      { now: new Date("2026-07-23T00:00:00.000Z") }
+    );
+
+    expect(results[0]).toMatchObject({
+      profileId: "hardware-supply",
+      recommendation: expect.stringMatching(/apply|review/)
+    });
+    expect(results[0]?.totalScore).toBeGreaterThanOrEqual(62);
+  });
 });

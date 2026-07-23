@@ -47,11 +47,26 @@ const DIRECT_ICT_CPV_PREFIXES = [
 
 const CONTEXTUAL_ICT_CPV_PREFIXES = ["30", "72", "713", "793", "794"] as const;
 
+const STRONG_ICT_KEYWORDS = [
+  "software",
+  "managed it services",
+  "it services",
+  "it equipment",
+  "computer equipment",
+  "information system",
+  "cybersecurity",
+  "cloud",
+  "backup",
+  "network"
+] as const;
+
 export const SOFTWARE_KEYWORDS = [
   "software",
   "development",
   "managed it services",
   "it services",
+  "it equipment",
+  "computer equipment",
   "ict",
   "web portal",
   "mobile application",
@@ -152,6 +167,8 @@ export const BUSINESS_PROFILES: BusinessProfile[] = [
     keywords: [
       "hardware",
       "computer",
+      "it equipment",
+      "computer equipment",
       "server",
       "laptop",
       "workstation",
@@ -423,8 +440,10 @@ function scoreRelevance(
           ? 46
           : 18
         : 0;
+  const keywordEvidenceScore = getKeywordEvidenceScore(keywordMatches);
   const score = clampScore(
-    cpvScore + Math.min(keywordMatches.length * 8, 32) - excludedMatches.length * 25
+    Math.max(cpvScore + Math.min(keywordMatches.length * 8, 32), keywordEvidenceScore) -
+      excludedMatches.length * 25
   );
 
   return buildComponent("relevance", "Relevance", 0.4, score, [
@@ -435,6 +454,32 @@ function scoreRelevance(
     ...keywordMatches.slice(0, 4).map((keyword) => `keyword: ${keyword}`),
     ...excludedMatches.slice(0, 2).map((keyword) => `excluded keyword: ${keyword}`)
   ]);
+}
+
+function getKeywordEvidenceScore(keywordMatches: readonly string[]): number {
+  if (keywordMatches.length === 0) {
+    return 0;
+  }
+
+  if (
+    keywordMatches.some((keyword) =>
+      STRONG_ICT_KEYWORDS.includes(
+        normalizeText(keyword) as (typeof STRONG_ICT_KEYWORDS)[number]
+      )
+    )
+  ) {
+    return 68;
+  }
+
+  if (keywordMatches.length >= 3) {
+    return 62;
+  }
+
+  if (keywordMatches.length >= 2) {
+    return 52;
+  }
+
+  return 34;
 }
 
 function hasDirectProfileCpvMatch(profile: BusinessProfile, cpvCode: string): boolean {
