@@ -24,9 +24,35 @@ export const SOFTWARE_CPV_PREFIXES = [
   "794"
 ] as const;
 
+const DIRECT_ICT_CPV_PREFIXES = [
+  "722",
+  "723",
+  "724",
+  "725",
+  "726",
+  "727",
+  "728",
+  "729",
+  "48",
+  "302",
+  "323",
+  "324",
+  "325",
+  "386",
+  "487",
+  "488",
+  "503",
+  "5033"
+] as const;
+
+const CONTEXTUAL_ICT_CPV_PREFIXES = ["30", "72", "713", "793", "794"] as const;
+
 export const SOFTWARE_KEYWORDS = [
   "software",
   "development",
+  "managed it services",
+  "it services",
+  "ict",
   "web portal",
   "mobile application",
   "information system",
@@ -61,6 +87,9 @@ export const BUSINESS_PROFILES: BusinessProfile[] = [
     keywords: [
       "software",
       "development",
+      "managed it services",
+      "it services",
+      "ict",
       "web portal",
       "mobile application",
       "information system",
@@ -85,6 +114,8 @@ export const BUSINESS_PROFILES: BusinessProfile[] = [
     kind: "services",
     cpvPrefixes: ["7225", "7226", "726", "503", "713"],
     keywords: [
+      "managed it services",
+      "it services",
       "support",
       "maintenance",
       "sla",
@@ -357,12 +388,10 @@ function getStrongestCpvWeight(cpvCodes: readonly string[]): number {
     const normalizedCode = cpvCode.trim();
     if (normalizedCode.startsWith("722")) {
       weight = Math.max(weight, 55);
-    } else if (normalizedCode.startsWith("72")) {
-      weight = Math.max(weight, 45);
     } else if (normalizedCode.startsWith("48")) {
       weight = Math.max(weight, 35);
     } else if (
-      SOFTWARE_CPV_PREFIXES.some((prefix) => normalizedCode.startsWith(prefix))
+      DIRECT_ICT_CPV_PREFIXES.some((prefix) => normalizedCode.startsWith(prefix))
     ) {
       weight = Math.max(weight, 20);
     }
@@ -379,18 +408,45 @@ function scoreRelevance(
   const cpvMatches = input.cpvCodes.filter((cpvCode) =>
     profile.cpvPrefixes.some((prefix) => cpvCode.trim().startsWith(prefix))
   );
+  const directCpvMatches = cpvMatches.filter((cpvCode) =>
+    hasDirectProfileCpvMatch(profile, cpvCode)
+  );
+  const contextualCpvMatches = cpvMatches.filter(
+    (cpvCode) => !hasDirectProfileCpvMatch(profile, cpvCode)
+  );
   const excludedMatches = findExcludedKeywordMatches(profile, input);
+  const cpvScore =
+    directCpvMatches.length > 0
+      ? 62
+      : contextualCpvMatches.length > 0
+        ? keywordMatches.length > 0
+          ? 46
+          : 18
+        : 0;
   const score = clampScore(
-    (cpvMatches.length > 0 ? 62 : 0) +
-      Math.min(keywordMatches.length * 8, 32) -
-      excludedMatches.length * 25
+    cpvScore + Math.min(keywordMatches.length * 8, 32) - excludedMatches.length * 25
   );
 
   return buildComponent("relevance", "Relevance", 0.4, score, [
     ...(cpvMatches.length > 0 ? [`CPV match: ${cpvMatches.slice(0, 3).join(", ")}`] : []),
+    ...(contextualCpvMatches.length > 0 && directCpvMatches.length === 0
+      ? ["Generic CPV needs IT-specific title or description evidence"]
+      : []),
     ...keywordMatches.slice(0, 4).map((keyword) => `keyword: ${keyword}`),
     ...excludedMatches.slice(0, 2).map((keyword) => `excluded keyword: ${keyword}`)
   ]);
+}
+
+function hasDirectProfileCpvMatch(profile: BusinessProfile, cpvCode: string): boolean {
+  const normalizedCode = cpvCode.trim();
+
+  return profile.cpvPrefixes.some(
+    (prefix) =>
+      normalizedCode.startsWith(prefix) &&
+      !CONTEXTUAL_ICT_CPV_PREFIXES.includes(
+        prefix as (typeof CONTEXTUAL_ICT_CPV_PREFIXES)[number]
+      )
+  );
 }
 
 function scoreEligibility(
@@ -485,7 +541,7 @@ function findKeywordMatches(input: OpportunityScoringInput): string[] {
   const matches = new Set<string>();
 
   for (const keyword of SOFTWARE_KEYWORDS) {
-    if (haystack.includes(normalizeText(keyword))) {
+    if (containsKeyword(haystack, keyword)) {
       matches.add(keyword);
     }
   }
@@ -498,7 +554,7 @@ function findProfileKeywordMatches(
   input: OpportunityScoringInput
 ): string[] {
   const haystack = normalizeText(`${input.title} ${input.description ?? ""}`);
-  return profile.keywords.filter((keyword) => haystack.includes(normalizeText(keyword)));
+  return profile.keywords.filter((keyword) => containsKeyword(haystack, keyword));
 }
 
 function findExcludedKeywordMatches(
@@ -506,13 +562,31 @@ function findExcludedKeywordMatches(
   input: OpportunityScoringInput
 ): string[] {
   const haystack = normalizeText(`${input.title} ${input.description ?? ""}`);
-  return profile.excludedKeywords.filter((keyword) =>
-    haystack.includes(normalizeText(keyword))
-  );
+  return profile.excludedKeywords.filter((keyword) => containsKeyword(haystack, keyword));
 }
 
 function normalizeText(value: string): string {
   return value.toLocaleLowerCase("bg-BG").replace(/\s+/g, " ").trim();
+}
+
+function containsKeyword(normalizedHaystack: string, keyword: string): boolean {
+  const normalizedKeyword = normalizeText(keyword);
+  if (!normalizedKeyword) {
+    return false;
+  }
+
+  if (/^[a-z0-9]{1,3}$/.test(normalizedKeyword)) {
+    return new RegExp(
+      `(^|[^a-z0-9])${escapeRegExp(normalizedKeyword)}([^a-z0-9]|$)`,
+      "u"
+    ).test(normalizedHaystack);
+  }
+
+  return normalizedHaystack.includes(normalizedKeyword);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function getDeadlineWeight(deadline: Date, now: Date): number {

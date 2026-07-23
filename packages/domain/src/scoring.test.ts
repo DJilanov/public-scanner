@@ -62,4 +62,53 @@ describe("scoreOpportunity", () => {
       "urgency"
     ]);
   });
+
+  it("downranks generic consulting CPVs without IT evidence", () => {
+    const results = scoreOpportunityAcrossProfiles(
+      {
+        title:
+          "Professional services for preparation of a masterplan for historic estates",
+        cpvCodes: ["79415200", "71310000"],
+        submissionDeadline: new Date("2026-08-20T00:00:00.000Z")
+      },
+      { now: new Date("2026-07-23T00:00:00.000Z") }
+    );
+
+    expect(results[0]?.totalScore).toBeLessThan(55);
+    expect(results[0]?.recommendation).toBe("skip");
+  });
+
+  it("downranks generic office supply CPVs without hardware evidence", () => {
+    const results = scoreOpportunityAcrossProfiles(
+      {
+        title: "Supply of personalized souvenir products for resale",
+        cpvCodes: ["30192700", "39298900"],
+        submissionDeadline: new Date("2026-08-20T00:00:00.000Z")
+      },
+      { now: new Date("2026-07-23T00:00:00.000Z") }
+    );
+
+    expect(results[0]?.totalScore).toBeLessThan(55);
+    expect(results[0]?.recommendation).toBe("skip");
+  });
+
+  it("keeps generic IT services CPVs when the title has explicit IT evidence", () => {
+    const results = scoreOpportunityAcrossProfiles(
+      {
+        title: "Managed IT services 2026",
+        cpvCodes: ["72000000"],
+        submissionDeadline: new Date("2026-08-20T00:00:00.000Z"),
+        estimatedValue: {
+          amount: 120000,
+          currency: "EUR"
+        }
+      },
+      { now: new Date("2026-07-23T00:00:00.000Z") }
+    );
+
+    expect(results[0]).toMatchObject({
+      recommendation: expect.stringMatching(/apply|review/)
+    });
+    expect(results[0]?.totalScore).toBeGreaterThanOrEqual(62);
+  });
 });
