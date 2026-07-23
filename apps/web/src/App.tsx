@@ -4,15 +4,25 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState
 } from "react";
 
+import {
+  buildApplicationPackMarkdown,
+  buildBidDecision,
+  buildDeadlineCalendarEvent,
+  buildOpportunityForecasts,
+  calculateBidEconomics
+} from "@public-scanner/domain";
 import type {
   AlertChannel,
   AlertRule,
   AlertRuleInput,
   ApplicationStage,
   ApplyStudioData,
+  BidDecision,
+  BidEconomics,
   BidRecommendation,
   BusinessProfile,
   BusinessProfileId,
@@ -30,6 +40,7 @@ import type {
   Money,
   Opportunity,
   OpportunityDetail,
+  OpportunityForecast,
   PipelineDashboardItem,
   ProcurementDashboard,
   ProfileFitScore,
@@ -47,6 +58,7 @@ type AuthState = "checking" | "authenticated" | "unauthenticated" | "error";
 type ThemePreference = "light" | "dark";
 type Locale = "en" | "bg";
 type SectorFilter = "" | BusinessProfileKind;
+type FundingFilter = "" | "eu-funded";
 type AppView =
   | "overview"
   | "opportunities"
@@ -88,8 +100,16 @@ interface Filters {
   cpvPrefix: string;
   source: string;
   sector: SectorFilter;
+  funding: FundingFilter;
   minScore: string;
   deadlineTo: string;
+}
+
+interface SavedOpportunityView {
+  id: string;
+  name: string;
+  filters: Filters;
+  createdAt: string;
 }
 
 interface PipelineForm {
@@ -118,6 +138,14 @@ interface EvidenceForm {
   validUntil: string;
   storageUrl: string;
   summary: string;
+}
+
+interface EconomicsForm {
+  deliveryCostAmount: string;
+  partnerCostAmount: string;
+  bidPreparationCostAmount: string;
+  warrantyReservePercent: string;
+  winProbabilityPercent: string;
 }
 
 interface ComplianceUpdatePayload {
@@ -183,6 +211,17 @@ const DEFAULT_LOGIN_FORM: LoginForm = {
   password: ""
 };
 
+const DEFAULT_FILTERS: Filters = {
+  search: "",
+  buyer: "",
+  cpvPrefix: "",
+  source: "",
+  sector: "",
+  funding: "",
+  minScore: "",
+  deadlineTo: ""
+};
+
 const DEFAULT_EVIDENCE_FORM: EvidenceForm = {
   title: "",
   type: "reference",
@@ -191,6 +230,14 @@ const DEFAULT_EVIDENCE_FORM: EvidenceForm = {
   validUntil: "",
   storageUrl: "",
   summary: ""
+};
+
+const DEFAULT_ECONOMICS_FORM: EconomicsForm = {
+  deliveryCostAmount: "",
+  partnerCostAmount: "",
+  bidPreparationCostAmount: "1500",
+  warrantyReservePercent: "5",
+  winProbabilityPercent: "35"
 };
 
 const DEFAULT_SELECTED_PROFILE_IDS: BusinessProfileId[] = [
@@ -231,6 +278,7 @@ const COMPLIANCE_STATUS_OPTIONS: ComplianceStatus[] = [
 ];
 
 const SECTOR_FILTERS: BusinessProfileKind[] = ["software", "hardware", "services"];
+const DEFAULT_SECTOR_MIN_SCORE = "50";
 
 const FALLBACK_PROFILE_IDS_BY_SECTOR: Record<BusinessProfileKind, BusinessProfileId[]> = {
   software: ["software-development", "saas-licensing"],
@@ -295,6 +343,22 @@ const TRANSLATIONS = {
     softwareSector: "Software",
     hardwareSector: "Hardware",
     servicesSector: "Services",
+    funding: "Funding",
+    allFunding: "All funding",
+    euFundedOnly: "EU funded only",
+    savedViews: "Saved views",
+    builtInViews: "Built-in views",
+    customViews: "Custom views",
+    viewName: "View name",
+    saveView: "Save view",
+    applyView: "Apply view",
+    removeView: "Remove view",
+    viewSoftware: "Software only",
+    viewHardware: "Hardware only",
+    viewServices: "Services only",
+    viewHighFit: "High fit",
+    viewDeadlineSoon: "Deadline soon",
+    viewEuFunded: "EU funded",
     business: "Business",
     search: "Search",
     buyer: "Buyer",
@@ -518,6 +582,14 @@ const TRANSLATIONS = {
     typeMethodology: "Methodology",
     typeOther: "Other",
     bidIntelligence: "Bid Intelligence",
+    bidNoBidDecision: "Bid/no-bid decision",
+    confidence: "Confidence",
+    risk: "Risk",
+    riskLow: "Low risk",
+    riskMedium: "Medium risk",
+    riskHigh: "High risk",
+    strengths: "Strengths",
+    blockers: "Blockers",
     tenderBrief: "Tender brief",
     companyCapabilityProfile: "Company capability profile",
     evidenceExpiryAlerts: "Evidence expiry alerts",
@@ -527,6 +599,10 @@ const TRANSLATIONS = {
     buyerRiskProfile: "Buyer risk profile",
     competitorWatch: "Competitor watch",
     applicationPackBuilder: "Application pack builder",
+    downloadPack: "Download pack",
+    downloadCalendar: "Add deadline",
+    opportunityForecasts: "Opportunity forecasts",
+    forecastConfidence: "confidence",
     deadlineCommandCenter: "Deadline command center",
     partnerMatching: "Partner matching",
     tenderChangeDetection: "Tender change detection",
@@ -541,7 +617,18 @@ const TRANSLATIONS = {
     evidenceExpired: "expired",
     evidenceExpiring: "expiring",
     requirementsReady: "requirements ready",
-    actionItems: "Action items"
+    actionItems: "Action items",
+    deliveryCost: "Delivery cost",
+    partnerCost: "Partner cost",
+    bidPreparationCost: "Bid prep cost",
+    warrantyReserve: "Warranty reserve",
+    winProbability: "Win probability",
+    revenue: "Revenue",
+    totalCost: "Total cost",
+    grossProfit: "Gross profit",
+    expectedValue: "Expected value",
+    breakEvenWinRate: "Break-even win rate",
+    margin: "Margin"
   },
   bg: {
     productEyebrow: "Public Scanner",
@@ -594,6 +681,22 @@ const TRANSLATIONS = {
     softwareSector: "Софтуер",
     hardwareSector: "Хардуер",
     servicesSector: "Услуги",
+    funding: "Финансиране",
+    allFunding: "Всяко финансиране",
+    euFundedOnly: "Само ЕС финансиране",
+    savedViews: "Запазени изгледи",
+    builtInViews: "Готови изгледи",
+    customViews: "Мои изгледи",
+    viewName: "Име на изглед",
+    saveView: "Запази изглед",
+    applyView: "Приложи изглед",
+    removeView: "Премахни изглед",
+    viewSoftware: "Само софтуер",
+    viewHardware: "Само хардуер",
+    viewServices: "Само услуги",
+    viewHighFit: "Силно съвпадение",
+    viewDeadlineSoon: "Скоро изтичащи",
+    viewEuFunded: "ЕС финансиране",
     business: "Бизнес",
     search: "Търсене",
     buyer: "Възложител",
@@ -817,6 +920,14 @@ const TRANSLATIONS = {
     typeMethodology: "Методология",
     typeOther: "Друго",
     bidIntelligence: "Интелигентен анализ",
+    bidNoBidDecision: "Решение участвай/пропусни",
+    confidence: "Увереност",
+    risk: "Риск",
+    riskLow: "Нисък риск",
+    riskMedium: "Среден риск",
+    riskHigh: "Висок риск",
+    strengths: "Силни страни",
+    blockers: "Блокери",
     tenderBrief: "Кратко резюме",
     companyCapabilityProfile: "Профил на възможностите",
     evidenceExpiryAlerts: "Валидност на доказателства",
@@ -826,6 +937,10 @@ const TRANSLATIONS = {
     buyerRiskProfile: "Риск на възложителя",
     competitorWatch: "Наблюдение на конкуренти",
     applicationPackBuilder: "Пакет за кандидатстване",
+    downloadPack: "Изтегли пакет",
+    downloadCalendar: "Добави срок",
+    opportunityForecasts: "Прогнози за възможности",
+    forecastConfidence: "увереност",
     deadlineCommandCenter: "Център за срокове",
     partnerMatching: "Партньорско покритие",
     tenderChangeDetection: "Следене на промени",
@@ -840,7 +955,18 @@ const TRANSLATIONS = {
     evidenceExpired: "изтекли",
     evidenceExpiring: "изтичащи",
     requirementsReady: "готови изисквания",
-    actionItems: "Действия"
+    actionItems: "Действия",
+    deliveryCost: "Разход за изпълнение",
+    partnerCost: "Партньорски разход",
+    bidPreparationCost: "Разход за подготовка",
+    warrantyReserve: "Гаранционен резерв",
+    winProbability: "Вероятност за победа",
+    revenue: "Приход",
+    totalCost: "Общ разход",
+    grossProfit: "Брутна печалба",
+    expectedValue: "Очаквана стойност",
+    breakEvenWinRate: "Минимален шанс за победа",
+    margin: "Марж"
   }
 } as const;
 
@@ -1054,16 +1180,15 @@ export function App() {
   const [selectedDetail, setSelectedDetail] = useState<OpportunityDetail>();
   const [pipelineForm, setPipelineForm] = useState<PipelineForm>(DEFAULT_PIPELINE_FORM);
   const [evidenceForm, setEvidenceForm] = useState<EvidenceForm>(DEFAULT_EVIDENCE_FORM);
+  const [economicsForm, setEconomicsForm] =
+    useState<EconomicsForm>(DEFAULT_ECONOMICS_FORM);
   const [alertForm, setAlertForm] = useState<AlertForm>(DEFAULT_ALERT_FORM);
-  const [filters, setFilters] = useState<Filters>({
-    search: "",
-    buyer: "",
-    cpvPrefix: "",
-    source: "",
-    sector: "",
-    minScore: "",
-    deadlineTo: ""
-  });
+  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [savedOpportunityViews, setSavedOpportunityViews] = useState<
+    SavedOpportunityView[]
+  >(getInitialSavedOpportunityViews);
+  const [savedViewName, setSavedViewName] = useState("");
+  const opportunityRequestUrlRef = useRef("");
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -1081,6 +1206,13 @@ export function App() {
       JSON.stringify(selectedProfileIds)
     );
   }, [selectedProfileIds]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      "public-scanner-saved-opportunity-views",
+      JSON.stringify(savedOpportunityViews)
+    );
+  }, [savedOpportunityViews]);
 
   const clearDashboardState = useCallback(() => {
     setProfiles([]);
@@ -1266,10 +1398,9 @@ export function App() {
       setErrorMessage(undefined);
 
       try {
-        const response = await fetch(
-          buildOpportunityUrl(filters, opportunityProfileIds),
-          signal ? { signal } : {}
-        );
+        const requestUrl = buildOpportunityUrl(filters, opportunityProfileIds);
+        opportunityRequestUrlRef.current = requestUrl;
+        const response = await fetch(requestUrl, signal ? { signal } : {});
 
         if (response.status === 401) {
           handleUnauthenticated();
@@ -1281,10 +1412,18 @@ export function App() {
         }
 
         const body = (await response.json()) as ApiResponse<Opportunity[]>;
+        if (signal?.aborted || opportunityRequestUrlRef.current !== requestUrl) {
+          return;
+        }
+
         setOpportunities(body.data);
         setLoadState("ready");
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        if (signal?.aborted) {
           return;
         }
 
@@ -1509,7 +1648,7 @@ export function App() {
     };
   }, [authState, loadAlertRules]);
 
-  const sortedOpportunities = useMemo(
+  const rankedOpportunities = useMemo(
     () =>
       [...opportunities].sort(
         (first, second) =>
@@ -1517,6 +1656,13 @@ export function App() {
           getOpportunityScore(first, opportunityProfileIds)
       ),
     [opportunities, opportunityProfileIds]
+  );
+  const sortedOpportunities = useMemo(
+    () =>
+      rankedOpportunities.filter((opportunity) =>
+        filters.funding === "eu-funded" ? opportunity.isEuFunded : true
+      ),
+    [filters.funding, rankedOpportunities]
   );
 
   useEffect(() => {
@@ -1944,6 +2090,39 @@ export function App() {
     });
   }, []);
 
+  const applyOpportunityView = useCallback((viewFilters: Partial<Filters>) => {
+    setFilters(normalizeFilters({ ...DEFAULT_FILTERS, ...viewFilters }));
+  }, []);
+
+  const saveOpportunityView = useCallback(() => {
+    const name = savedViewName.trim();
+    if (!name) {
+      return;
+    }
+
+    setSavedOpportunityViews((current) => [
+      {
+        id: createClientId("view"),
+        name,
+        filters: normalizeFilters(filters),
+        createdAt: new Date().toISOString()
+      },
+      ...current
+    ]);
+    setSavedViewName("");
+  }, [filters, savedViewName]);
+
+  const removeSavedOpportunityView = useCallback((viewId: string) => {
+    setSavedOpportunityViews((current) => current.filter((view) => view.id !== viewId));
+  }, []);
+
+  const updateEconomicsField = useCallback((key: keyof EconomicsForm, value: string) => {
+    setEconomicsForm((current) => ({
+      ...current,
+      [key]: normalizeDecimalInput(value)
+    }));
+  }, []);
+
   const toggleEvidenceProfile = useCallback((profileId: BusinessProfileId) => {
     setEvidenceForm((current) => {
       if (current.profileIds.includes(profileId)) {
@@ -2217,6 +2396,17 @@ export function App() {
             />
           </section>
 
+          <SavedViewsBar
+            filters={filters}
+            locale={locale}
+            savedViewName={savedViewName}
+            savedViews={savedOpportunityViews}
+            onApplyView={applyOpportunityView}
+            onChangeSavedViewName={setSavedViewName}
+            onRemoveSavedView={removeSavedOpportunityView}
+            onSaveView={saveOpportunityView}
+          />
+
           <section className="filters" aria-label={t(locale, "navOpportunities")}>
             <label>
               <span>{t(locale, "search")}</span>
@@ -2268,10 +2458,18 @@ export function App() {
               <select
                 value={filters.sector}
                 onChange={(event) =>
-                  setFilters((current) => ({
-                    ...current,
-                    sector: event.target.value as SectorFilter
-                  }))
+                  setFilters((current) => {
+                    const nextSector = event.target.value as SectorFilter;
+                    return {
+                      ...current,
+                      sector: nextSector,
+                      minScore: nextSector
+                        ? current.minScore || DEFAULT_SECTOR_MIN_SCORE
+                        : current.minScore === DEFAULT_SECTOR_MIN_SCORE
+                          ? ""
+                          : current.minScore
+                    };
+                  })
                 }
               >
                 <option value="">{t(locale, "allSectors")}</option>
@@ -2280,6 +2478,21 @@ export function App() {
                     {formatSectorFilter(sector, locale)}
                   </option>
                 ))}
+              </select>
+            </label>
+            <label>
+              <span>{t(locale, "funding")}</span>
+              <select
+                value={filters.funding}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    funding: event.target.value as FundingFilter
+                  }))
+                }
+              >
+                <option value="">{t(locale, "allFunding")}</option>
+                <option value="eu-funded">{t(locale, "euFundedOnly")}</option>
               </select>
             </label>
             <label>
@@ -2336,9 +2549,11 @@ export function App() {
             </div>
 
             <OpportunityPreview
+              applyStudio={applyStudio}
               detail={selectedDetail}
               detailLoadState={detailLoadState}
               detailErrorMessage={detailErrorMessage}
+              economicsForm={economicsForm}
               pipelineErrorMessage={pipelineErrorMessage}
               pipelineForm={pipelineForm}
               pipelineSaving={pipelineSaving}
@@ -2350,6 +2565,7 @@ export function App() {
               locale={locale}
               profileScore={selectedScore}
               selectedProfileIds={opportunityProfileIds}
+              onChangeEconomicsField={updateEconomicsField}
               onChangePipelineField={updatePipelineField}
               onSavePipeline={savePipelineState}
               onChangeAlertField={updateAlertField}
@@ -2657,6 +2873,94 @@ function WorkspaceHeader({
   );
 }
 
+interface SavedViewsBarProps {
+  filters: Filters;
+  locale: Locale;
+  savedViewName: string;
+  savedViews: SavedOpportunityView[];
+  onApplyView(filters: Partial<Filters>): void;
+  onChangeSavedViewName(value: string): void;
+  onRemoveSavedView(viewId: string): void;
+  onSaveView(): void;
+}
+
+function SavedViewsBar({
+  filters,
+  locale,
+  savedViewName,
+  savedViews,
+  onApplyView,
+  onChangeSavedViewName,
+  onRemoveSavedView,
+  onSaveView
+}: SavedViewsBarProps) {
+  const builtInViews = getBuiltInOpportunityViews(locale);
+
+  return (
+    <section className="saved-views" aria-label={t(locale, "savedViews")}>
+      <div className="section-heading">
+        <h3>{t(locale, "savedViews")}</h3>
+        <span>{formatActiveFilterSummary(filters, locale)}</span>
+      </div>
+      <div className="saved-view-group">
+        <span>{t(locale, "builtInViews")}</span>
+        <div className="view-chip-row">
+          {builtInViews.map((view) => (
+            <button
+              key={view.id}
+              type="button"
+              className="secondary-action mini-action"
+              onClick={() => onApplyView(view.filters)}
+            >
+              {view.name}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="saved-view-group">
+        <span>{t(locale, "customViews")}</span>
+        <div className="view-chip-row">
+          {savedViews.length === 0 ? (
+            <span className="muted">{t(locale, "noItemsDetected")}</span>
+          ) : (
+            savedViews.map((view) => (
+              <span key={view.id} className="saved-view-chip">
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => onApplyView(view.filters)}
+                >
+                  {view.name}
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={`${t(locale, "removeView")}: ${view.name}`}
+                  onClick={() => onRemoveSavedView(view.id)}
+                >
+                  ×
+                </button>
+              </span>
+            ))
+          )}
+        </div>
+      </div>
+      <div className="save-view-form">
+        <label>
+          <span>{t(locale, "viewName")}</span>
+          <input
+            value={savedViewName}
+            onChange={(event) => onChangeSavedViewName(event.target.value)}
+          />
+        </label>
+        <button type="button" disabled={!savedViewName.trim()} onClick={onSaveView}>
+          {t(locale, "saveView")}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 interface DashboardNoticeProps {
   errorMessage: string | undefined;
   locale: Locale;
@@ -2723,6 +3027,7 @@ function OverviewPage({
       source.status === "partial" ||
       source.recentErrorCount > 0
   ).length;
+  const forecasts = buildOpportunityForecasts({ dashboard, limit: 6 });
 
   return (
     <section className="content" id="overview">
@@ -2795,6 +3100,13 @@ function OverviewPage({
               title: source.source,
               meta: `${formatSourceRunStatus(source.status, locale)} - ${source.recentErrorCount} ${t(locale, "recentErrors")}`
             }))}
+          />
+        </DashboardPanel>
+        <DashboardPanel title={t(locale, "opportunityForecasts")}>
+          <ForecastList
+            emptyLabel={t(locale, "noDashboardData")}
+            forecasts={forecasts}
+            locale={locale}
           />
         </DashboardPanel>
       </section>
@@ -4152,9 +4464,11 @@ function OpportunityTable({
 }
 
 interface OpportunityPreviewProps {
+  applyStudio: ApplyStudioData;
   detail: OpportunityDetail | undefined;
   detailLoadState: LoadState;
   detailErrorMessage: string | undefined;
+  economicsForm: EconomicsForm;
   pipelineErrorMessage: string | undefined;
   pipelineForm: PipelineForm;
   pipelineSaving: boolean;
@@ -4166,6 +4480,7 @@ interface OpportunityPreviewProps {
   locale: Locale;
   profileScore: ProfileFitScore | undefined;
   selectedProfileIds: BusinessProfileId[];
+  onChangeEconomicsField(key: keyof EconomicsForm, value: string): void;
   onChangePipelineField(key: keyof PipelineForm, value: string): void;
   onSavePipeline(): void;
   onChangeAlertField(key: keyof AlertForm, value: string | boolean): void;
@@ -4173,9 +4488,11 @@ interface OpportunityPreviewProps {
 }
 
 function OpportunityPreview({
+  applyStudio,
   detail,
   detailLoadState,
   detailErrorMessage,
+  economicsForm,
   pipelineErrorMessage,
   pipelineForm,
   pipelineSaving,
@@ -4187,6 +4504,7 @@ function OpportunityPreview({
   locale,
   profileScore,
   selectedProfileIds,
+  onChangeEconomicsField,
   onChangePipelineField,
   onSavePipeline,
   onChangeAlertField,
@@ -4235,6 +4553,28 @@ function OpportunityPreview({
   );
   const visibleScore = profileScore ?? bestScore;
   const intelligence = detail.documentIntelligence;
+  const selectedComplianceItems = applyStudio.complianceItems.filter(
+    (item) => item.opportunityId === detail.opportunity.id
+  );
+  const bidDecision = buildBidDecision({
+    opportunity: detail.opportunity,
+    selectedProfileIds,
+    complianceItems: selectedComplianceItems,
+    ...(intelligence ? { documentIntelligence: intelligence } : {})
+  });
+  const bidEconomics = calculateBidEconomics({
+    ...(detail.opportunity.estimatedValue
+      ? { estimatedValue: detail.opportunity.estimatedValue }
+      : {}),
+    deliveryCostAmount: parseNonNegativeDecimal(economicsForm.deliveryCostAmount),
+    partnerCostAmount: parseNonNegativeDecimal(economicsForm.partnerCostAmount),
+    bidPreparationCostAmount: parseNonNegativeDecimal(
+      economicsForm.bidPreparationCostAmount
+    ),
+    warrantyReservePercent: parseNonNegativeDecimal(economicsForm.warrantyReservePercent),
+    winProbabilityPercent: parseNonNegativeDecimal(economicsForm.winProbabilityPercent)
+  });
+  const calendarContent = buildDeadlineCalendarEvent(detail.opportunity);
 
   return (
     <aside className="preview-panel" id="pipeline">
@@ -4255,7 +4595,55 @@ function OpportunityPreview({
         </a>
         <span>{formatMoney(detail.opportunity.estimatedValue, locale)}</span>
         <span>{formatDate(detail.opportunity.submissionDeadline, locale)}</span>
+        <button
+          type="button"
+          className="secondary-action mini-action"
+          disabled={!calendarContent}
+          onClick={() => {
+            if (calendarContent) {
+              downloadTextFile(
+                `${slugifyFileName(detail.opportunity.title)}-deadline.ics`,
+                calendarContent,
+                "text/calendar;charset=utf-8"
+              );
+            }
+          }}
+        >
+          {t(locale, "downloadCalendar")}
+        </button>
+        <button
+          type="button"
+          className="secondary-action mini-action"
+          onClick={() =>
+            downloadTextFile(
+              `${slugifyFileName(detail.opportunity.title)}-application-pack.md`,
+              buildApplicationPackMarkdown({
+                detail,
+                complianceItems: selectedComplianceItems,
+                evidenceItems: applyStudio.evidenceItems,
+                selectedProfileIds,
+                decision: bidDecision
+              }),
+              "text/markdown;charset=utf-8"
+            )
+          }
+        >
+          {t(locale, "downloadPack")}
+        </button>
       </div>
+
+      <DecisionSummary
+        decision={bidDecision}
+        locale={locale}
+        selectedProfileIds={selectedProfileIds}
+      />
+
+      <BidEconomicsPanel
+        economics={bidEconomics}
+        form={economicsForm}
+        locale={locale}
+        onChangeField={onChangeEconomicsField}
+      />
 
       <section className="preview-section">
         <div className="section-heading">
@@ -4486,6 +4874,153 @@ function OpportunityPreview({
   );
 }
 
+interface DecisionSummaryProps {
+  decision: BidDecision;
+  locale: Locale;
+  selectedProfileIds: BusinessProfileId[];
+}
+
+function DecisionSummary({ decision, locale, selectedProfileIds }: DecisionSummaryProps) {
+  return (
+    <section className="preview-section decision-summary">
+      <div className="section-heading">
+        <h4>{t(locale, "bidNoBidDecision")}</h4>
+        <span className={getRecommendationBadgeClass(decision.recommendation)}>
+          {formatStrategicRecommendation(decision.recommendation, locale)}
+        </span>
+      </div>
+      <div className="decision-metrics">
+        <Metric label={t(locale, "score")} value={`${decision.score}/100`} />
+        <Metric label={t(locale, "confidence")} value={`${decision.confidence}/100`} />
+        <Metric label={t(locale, "readiness")} value={`${decision.readinessPercent}%`} />
+        <Metric
+          label={t(locale, "risk")}
+          value={formatRiskLevel(decision.riskLevel, locale)}
+        />
+      </div>
+      <p className="muted">{formatSelectedSectorSummary(selectedProfileIds, locale)}</p>
+      <div className="decision-list-grid">
+        <Checklist
+          title={t(locale, "strengths")}
+          items={decision.strengths.map((item) => formatDecisionText(item, locale))}
+          locale={locale}
+        />
+        <Checklist
+          title={t(locale, "blockers")}
+          items={decision.blockers.map((item) => formatDecisionText(item, locale))}
+          locale={locale}
+        />
+        <Checklist
+          title={t(locale, "actionItems")}
+          items={decision.nextActions.map((item) => formatDecisionText(item, locale))}
+          locale={locale}
+        />
+      </div>
+    </section>
+  );
+}
+
+interface BidEconomicsPanelProps {
+  economics: BidEconomics;
+  form: EconomicsForm;
+  locale: Locale;
+  onChangeField(key: keyof EconomicsForm, value: string): void;
+}
+
+function BidEconomicsPanel({
+  economics,
+  form,
+  locale,
+  onChangeField
+}: BidEconomicsPanelProps) {
+  return (
+    <section className="preview-section economics-panel">
+      <div className="section-heading">
+        <h4>{t(locale, "effortProfitabilityScore")}</h4>
+        <span>{formatRiskLevel(economics.riskLevel, locale)}</span>
+      </div>
+      <div className="economics-form">
+        <label>
+          <span>{t(locale, "deliveryCost")}</span>
+          <input
+            inputMode="decimal"
+            value={form.deliveryCostAmount}
+            onChange={(event) => onChangeField("deliveryCostAmount", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>{t(locale, "partnerCost")}</span>
+          <input
+            inputMode="decimal"
+            value={form.partnerCostAmount}
+            onChange={(event) => onChangeField("partnerCostAmount", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>{t(locale, "bidPreparationCost")}</span>
+          <input
+            inputMode="decimal"
+            value={form.bidPreparationCostAmount}
+            onChange={(event) =>
+              onChangeField("bidPreparationCostAmount", event.target.value)
+            }
+          />
+        </label>
+        <label>
+          <span>{t(locale, "warrantyReserve")}</span>
+          <input
+            inputMode="decimal"
+            value={form.warrantyReservePercent}
+            onChange={(event) =>
+              onChangeField("warrantyReservePercent", event.target.value)
+            }
+          />
+        </label>
+        <label>
+          <span>{t(locale, "winProbability")}</span>
+          <input
+            inputMode="decimal"
+            value={form.winProbabilityPercent}
+            onChange={(event) =>
+              onChangeField("winProbabilityPercent", event.target.value)
+            }
+          />
+        </label>
+      </div>
+      <div className="economics-metrics">
+        <Metric
+          label={t(locale, "revenue")}
+          value={formatMoneyAmount(economics.revenue, economics.currency, locale)}
+        />
+        <Metric
+          label={t(locale, "totalCost")}
+          value={formatMoneyAmount(
+            economics.totalDeliveryCost,
+            economics.currency,
+            locale
+          )}
+        />
+        <Metric
+          label={t(locale, "grossProfit")}
+          value={formatMoneyAmount(economics.grossProfit, economics.currency, locale)}
+        />
+        <Metric
+          label={t(locale, "margin")}
+          value={formatPercentValue(economics.grossMarginPercent, locale)}
+        />
+        <Metric
+          label={t(locale, "expectedValue")}
+          value={formatMoneyAmount(economics.expectedValue, economics.currency, locale)}
+        />
+        <Metric
+          label={t(locale, "breakEvenWinRate")}
+          value={formatPercentValue(economics.breakEvenWinProbabilityPercent, locale)}
+        />
+      </div>
+    </section>
+  );
+}
+
 interface ChecklistProps {
   title: string;
   items: string[];
@@ -4532,6 +5067,42 @@ function CompactList({ emptyLabel, items }: CompactListProps) {
           <strong>{item.title}</strong>
           <span>{item.meta}</span>
         </div>
+      ))}
+    </div>
+  );
+}
+
+interface ForecastListProps {
+  emptyLabel: string;
+  forecasts: OpportunityForecast[];
+  locale: Locale;
+}
+
+function ForecastList({ emptyLabel, forecasts, locale }: ForecastListProps) {
+  if (forecasts.length === 0) {
+    return <p className="muted">{emptyLabel}</p>;
+  }
+
+  return (
+    <div className="forecast-list">
+      {forecasts.map((forecast) => (
+        <article key={forecast.id} className="forecast-item">
+          <div>
+            <strong>{forecast.buyerName}</strong>
+            <span>{formatForecastTitle(forecast, locale)}</span>
+          </div>
+          <div className="signal-list">
+            <span className={getForecastBadgeClass(forecast.confidence)}>
+              {forecast.confidence}% {t(locale, "forecastConfidence")}
+            </span>
+            <span className="signal-badge signal-neutral">
+              {forecast.nextExpectedDate
+                ? formatDate(forecast.nextExpectedDate, locale)
+                : t(locale, "notAvailable")}
+            </span>
+          </div>
+          <p>{formatForecastBasis(forecast.basis, locale)}</p>
+        </article>
       ))}
     </div>
   );
@@ -5283,7 +5854,7 @@ function buildOpportunityUrl(
     buyer: filters.buyer,
     cpvPrefix: filters.cpvPrefix,
     source: filters.source,
-    minScore: filters.minScore,
+    minScore: getEffectiveMinScore(filters),
     deadlineTo: filters.deadlineTo
   };
 
@@ -5329,6 +5900,51 @@ function getInitialSelectedProfileIds(): BusinessProfileId[] {
   }
 }
 
+function getInitialSavedOpportunityViews(): SavedOpportunityView[] {
+  const stored = window.localStorage.getItem("public-scanner-saved-opportunity-views");
+  if (!stored) {
+    return [];
+  }
+
+  try {
+    return normalizeSavedOpportunityViews(JSON.parse(stored) as unknown);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeSavedOpportunityViews(value: unknown): SavedOpportunityView[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry): SavedOpportunityView | undefined => {
+      if (!entry || typeof entry !== "object") {
+        return undefined;
+      }
+
+      const candidate = entry as Partial<SavedOpportunityView>;
+      if (typeof candidate.id !== "string" || typeof candidate.name !== "string") {
+        return undefined;
+      }
+
+      return {
+        id: candidate.id,
+        name: candidate.name.trim().slice(0, 80),
+        filters: normalizeFilters(candidate.filters),
+        createdAt:
+          typeof candidate.createdAt === "string"
+            ? candidate.createdAt
+            : new Date().toISOString()
+      };
+    })
+    .filter((entry): entry is SavedOpportunityView =>
+      Boolean(entry && entry.name.length > 0)
+    )
+    .slice(0, 20);
+}
+
 function normalizeSelectedProfileIds(value: unknown): BusinessProfileId[] {
   if (!Array.isArray(value)) {
     return DEFAULT_SELECTED_PROFILE_IDS;
@@ -5348,6 +5964,81 @@ function normalizeSelectedProfileIds(value: unknown): BusinessProfileId[] {
   return selectedProfileIds.length > 0
     ? selectedProfileIds
     : DEFAULT_SELECTED_PROFILE_IDS;
+}
+
+function normalizeFilters(value: Partial<Filters> | undefined): Filters {
+  return {
+    search: normalizeTextFilter(value?.search),
+    buyer: normalizeTextFilter(value?.buyer),
+    cpvPrefix: normalizeTextFilter(value?.cpvPrefix).replace(/\D/g, "").slice(0, 8),
+    source: normalizeTextFilter(value?.source),
+    sector: value?.sector && SECTOR_FILTERS.includes(value.sector) ? value.sector : "",
+    funding: value?.funding === "eu-funded" ? "eu-funded" : "",
+    minScore: normalizeTextFilter(value?.minScore).replace(/\D/g, "").slice(0, 3),
+    deadlineTo: normalizeTextFilter(value?.deadlineTo)
+  };
+}
+
+function normalizeTextFilter(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getBuiltInOpportunityViews(
+  locale: Locale
+): Array<{ id: string; name: string; filters: Partial<Filters> }> {
+  return [
+    {
+      id: "software",
+      name: t(locale, "viewSoftware"),
+      filters: { sector: "software", minScore: DEFAULT_SECTOR_MIN_SCORE }
+    },
+    {
+      id: "hardware",
+      name: t(locale, "viewHardware"),
+      filters: { sector: "hardware", minScore: DEFAULT_SECTOR_MIN_SCORE }
+    },
+    {
+      id: "services",
+      name: t(locale, "viewServices"),
+      filters: { sector: "services", minScore: DEFAULT_SECTOR_MIN_SCORE }
+    },
+    {
+      id: "high-fit",
+      name: t(locale, "viewHighFit"),
+      filters: { minScore: "78" }
+    },
+    {
+      id: "deadline-soon",
+      name: t(locale, "viewDeadlineSoon"),
+      filters: { deadlineTo: formatDateInput(addDays(new Date(), 30)) }
+    },
+    {
+      id: "eu-funded",
+      name: t(locale, "viewEuFunded"),
+      filters: { funding: "eu-funded" }
+    }
+  ];
+}
+
+function formatActiveFilterSummary(filters: Filters, locale: Locale): string {
+  const effectiveMinScore = getEffectiveMinScore(filters);
+  const activeFilters = [
+    filters.sector ? formatSectorFilter(filters.sector, locale) : undefined,
+    filters.funding ? t(locale, "euFundedOnly") : undefined,
+    filters.source ? filters.source.toUpperCase() : undefined,
+    effectiveMinScore ? `${t(locale, "score")} ${effectiveMinScore}+` : undefined,
+    filters.deadlineTo
+      ? `${t(locale, "deadline")} ${formatDate(filters.deadlineTo, locale)}`
+      : undefined,
+    filters.buyer ? `${t(locale, "buyer")}: ${filters.buyer}` : undefined,
+    filters.search ? `${t(locale, "search")}: ${filters.search}` : undefined
+  ].filter((value): value is string => Boolean(value));
+
+  return activeFilters.length > 0 ? activeFilters.join(" · ") : t(locale, "all");
+}
+
+function getEffectiveMinScore(filters: Filters): string {
+  return filters.minScore || (filters.sector ? DEFAULT_SECTOR_MIN_SCORE : "");
 }
 
 function getOpportunityScore(
@@ -5486,6 +6177,58 @@ function parsePositiveInteger(value: string): number | undefined {
   return Math.trunc(parsed);
 }
 
+function normalizeDecimalInput(value: string): string {
+  return value
+    .replace(/[^\d.]/g, "")
+    .replace(/(\..*)\./g, "$1")
+    .slice(0, 12);
+}
+
+function parseNonNegativeDecimal(value: string): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function addDays(value: Date, days: number): Date {
+  const next = new Date(value);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function formatDateInput(value: Date): string {
+  return [
+    value.getFullYear(),
+    String(value.getMonth() + 1).padStart(2, "0"),
+    String(value.getDate()).padStart(2, "0")
+  ].join("-");
+}
+
+function createClientId(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function downloadTextFile(filename: string, content: string, contentType: string): void {
+  const blob = new Blob([content], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function slugifyFileName(value: string): string {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9а-я]+/giu, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
+
+  return normalized || "tender";
+}
+
 function toPipelineForm(state: SavedOpportunityState | undefined): PipelineForm {
   return {
     stage: state?.stage ?? "watching",
@@ -5523,6 +6266,30 @@ function formatMoney(value: Money | undefined, locale: Locale): string {
   } catch {
     return `${value.amount.toLocaleString(locale === "bg" ? "bg-BG" : "en-GB")} ${value.currency}`;
   }
+}
+
+function formatMoneyAmount(
+  amount: number | undefined,
+  currency: string | undefined,
+  locale: Locale
+): string {
+  if (amount === undefined || !currency) {
+    return t(locale, "notStated");
+  }
+
+  return formatMoney({ amount, currency }, locale);
+}
+
+function formatPercentValue(value: number | undefined, locale: Locale): string {
+  if (value === undefined) {
+    return t(locale, "notStated");
+  }
+
+  return (
+    new Intl.NumberFormat(locale === "bg" ? "bg-BG" : "en-GB", {
+      maximumFractionDigits: 0
+    }).format(value) + "%"
+  );
 }
 
 function formatStage(stage: ApplicationStage, locale: Locale): string {
@@ -5762,6 +6529,69 @@ function formatGeneratedText(value: string, locale: Locale): string {
   return value;
 }
 
+function formatDecisionText(value: string, locale: Locale): string {
+  if (locale !== "bg") {
+    return value;
+  }
+
+  const exact: Record<string, string> = {
+    "Submission deadline is missing.": "Крайният срок за подаване липсва.",
+    "Submission deadline has passed.": "Крайният срок за подаване е изтекъл.",
+    "Submission window is critically short.": "Прозорецът за подаване е критично кратък.",
+    "Estimated value is missing, so commercial fit needs review.":
+      "Прогнозната стойност липсва, затова търговският потенциал изисква преглед.",
+    "Strong profile fit for the selected sector.": "Силно съвпадение с избрания сектор.",
+    "Most compliance requirements are ready or not applicable.":
+      "Повечето изисквания за съответствие са готови или неприложими.",
+    "EU funding signal is present.": "Има сигнал за ЕС финансиране.",
+    "Estimated value is large enough to justify deeper review.":
+      "Прогнозната стойност е достатъчно висока за по-задълбочен преглед.",
+    "No strong positive signal yet.": "Все още няма силен положителен сигнал.",
+    "Confirm the business profile before relying on the score.":
+      "Потвърди бизнес профила преди да разчиташ на резултата.",
+    "Estimate project value and delivery cost before pricing.":
+      "Оцени стойността и разхода за изпълнение преди ценообразуване.",
+    "Resolve blocked compliance items or identify a partner.":
+      "Реши блокираните изисквания или намери партньор.",
+    "Assign owners for missing compliance requirements.":
+      "Назначи отговорници за липсващите изисквания.",
+    "Prepare clarification questions for the highest-risk clauses.":
+      "Подготви въпроси за разяснения по най-рисковите клаузи.",
+    "Create an internal submission checkpoint within 24 hours.":
+      "Създай вътрешна контролна точка за подаване до 24 часа.",
+    "Move the tender to preparing and build the application pack.":
+      "Премести търга към подготовка и създай пакета за кандидатстване.",
+    "Complete a manual bid/no-bid review before committing effort.":
+      "Направи ръчен преглед участвай/пропусни преди да ангажираш ресурс.",
+    "Validate partner coverage before pricing.":
+      "Потвърди партньорското покритие преди ценообразуване.",
+    "Save a no-bid reason so future decisions improve.":
+      "Запази причина за отказ, за да се подобрят бъдещите решения."
+  };
+
+  const exactMatch = exact[value];
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const blockedMatch = /^(\d+) compliance items are blocked\.$/.exec(value);
+  if (blockedMatch) {
+    return `${blockedMatch[1] ?? "0"} изисквания за съответствие са блокирани.`;
+  }
+
+  const missingMatch = /^(\d+) compliance items are still missing\.$/.exec(value);
+  if (missingMatch) {
+    return `${missingMatch[1] ?? "0"} изисквания за съответствие все още липсват.`;
+  }
+
+  const profileMatch = /^Best matching profile: (.+)\.$/.exec(value);
+  if (profileMatch) {
+    return `Най-подходящ профил: ${formatGeneratedProfileName(profileMatch[1], locale)}.`;
+  }
+
+  return formatGeneratedText(value, locale);
+}
+
 function formatGeneratedProfileName(value: string | undefined, locale: Locale): string {
   if (!value) {
     return locale === "bg" ? "Общ ИТ профил" : "General IT";
@@ -5820,6 +6650,50 @@ function formatSectorFilter(sector: BusinessProfileKind, locale: Locale): string
   }
 }
 
+function formatRiskLevel(riskLevel: BidDecision["riskLevel"], locale: Locale): string {
+  switch (riskLevel) {
+    case "low":
+      return t(locale, "riskLow");
+    case "medium":
+      return t(locale, "riskMedium");
+    case "high":
+      return t(locale, "riskHigh");
+  }
+}
+
+function formatForecastTitle(forecast: OpportunityForecast, locale: Locale): string {
+  const cpvCodes = forecast.cpvCodes.slice(0, 2).join(", ");
+  if (locale === "bg") {
+    return cpvCodes
+      ? `Повтаряща се поръчка за CPV ${cpvCodes}`
+      : "Наблюдение за повтаряща се поръчка";
+  }
+
+  return forecast.title;
+}
+
+function formatForecastBasis(value: string, locale: Locale): string {
+  if (locale !== "bg") {
+    return value;
+  }
+
+  const cadenceMatch =
+    /^Based on (\d+) tracked contracts and an average (\d+)-day cadence\.$/.exec(value);
+  if (cadenceMatch) {
+    return `На база ${cadenceMatch[1] ?? "0"} проследени договора и среден цикъл ${cadenceMatch[2] ?? "0"} дни.`;
+  }
+
+  const activeMatch =
+    /^Based on (\d+) tracked contracts and (\d+) currently open opportunities\.$/.exec(
+      value
+    );
+  if (activeMatch) {
+    return `На база ${activeMatch[1] ?? "0"} проследени договора и ${activeMatch[2] ?? "0"} текущо отворени възможности.`;
+  }
+
+  return value;
+}
+
 function formatAlertChannel(channel: AlertChannel, locale: Locale): string {
   switch (channel) {
     case "email":
@@ -5829,6 +6703,22 @@ function formatAlertChannel(channel: AlertChannel, locale: Locale): string {
     case "slack":
       return t(locale, "slackChannel");
   }
+}
+
+function getRecommendationBadgeClass(recommendation: BidRecommendation): string {
+  return `signal-badge signal-${getRecommendationTone(recommendation)}`;
+}
+
+function getForecastBadgeClass(confidence: number): string {
+  if (confidence >= 72) {
+    return "signal-badge signal-positive";
+  }
+
+  if (confidence >= 50) {
+    return "signal-badge signal-warning";
+  }
+
+  return "signal-badge signal-neutral";
 }
 
 function getScoreClassName(score: number): string {

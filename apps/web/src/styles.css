@@ -246,6 +246,8 @@ textarea:focus-visible {
 .state-panel,
 .preview-panel,
 .profile-tile,
+.saved-views,
+.forecast-item,
 .compact-list > div {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -278,6 +280,9 @@ textarea:focus-visible {
 .auth-card label span,
 .filters span,
 .pipeline-form label span,
+.economics-form label span,
+.save-view-form label span,
+.saved-view-group > span,
 .metric span,
 .session-card span {
   color: var(--text-soft);
@@ -326,7 +331,9 @@ textarea:focus-visible {
 
 .auth-card label,
 .filters label,
-.pipeline-form label {
+.pipeline-form label,
+.economics-form label,
+.save-view-form label {
   display: grid;
   gap: 6px;
 }
@@ -336,7 +343,9 @@ textarea:focus-visible {
 .filters select,
 .pipeline-form input,
 .pipeline-form select,
-.pipeline-form textarea {
+.pipeline-form textarea,
+.economics-form input,
+.save-view-form input {
   width: 100%;
   min-height: 40px;
   border: 1px solid var(--border);
@@ -588,9 +597,79 @@ textarea:focus-visible {
 
 .filters {
   display: grid;
-  grid-template-columns: 1.35fr 1.05fr 0.62fr 0.75fr 0.75fr 0.62fr 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 18px;
+}
+
+.saved-views {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 14px;
+  background: var(--surface);
+}
+
+.saved-view-group {
+  display: grid;
+  gap: 8px;
+}
+
+.view-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.saved-view-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 4px 0 10px;
+  background: var(--surface-raised);
+}
+
+.saved-view-chip .text-button {
+  min-height: 30px;
+}
+
+.icon-button {
+  width: 28px;
+  min-height: 28px;
+  border-color: transparent;
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.icon-button:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--surface-muted);
+  box-shadow: none;
+  color: var(--text);
+  transform: none;
+}
+
+.save-view-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.saved-views .section-heading {
+  align-items: start;
+}
+
+.saved-views .section-heading span {
+  max-width: 62%;
+  text-align: right;
+  white-space: normal;
 }
 
 .settings-grid {
@@ -623,6 +702,31 @@ textarea:focus-visible {
 
 .dashboard-panel {
   align-content: start;
+}
+
+.forecast-list {
+  display: grid;
+  gap: 10px;
+}
+
+.forecast-item {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: var(--surface-raised);
+}
+
+.forecast-item strong {
+  display: block;
+  margin-bottom: 3px;
+}
+
+.forecast-item span,
+.forecast-item p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  line-height: 1.4;
 }
 
 .segmented-control {
@@ -1118,6 +1222,43 @@ button.text-button:hover:not(:disabled),
   padding-top: 14px;
 }
 
+.decision-summary {
+  gap: 12px;
+}
+
+.decision-metrics,
+.economics-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.decision-metrics .metric,
+.economics-metrics .metric {
+  min-height: 70px;
+  padding: 10px;
+}
+
+.decision-metrics .metric strong,
+.economics-metrics .metric strong {
+  font-size: 1rem;
+}
+
+.decision-list-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.economics-panel {
+  gap: 12px;
+}
+
+.economics-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .section-heading {
   display: flex;
   align-items: center;
@@ -1286,7 +1427,8 @@ meter {
   .metrics,
   .dashboard-grid,
   .settings-grid,
-  .auth-signal-grid {
+  .auth-signal-grid,
+  .save-view-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1315,8 +1457,17 @@ meter {
   .segmented-control,
   .auth-signal-grid,
   .profile-grid,
-  .pipeline-form {
+  .pipeline-form,
+  .economics-form,
+  .decision-metrics,
+  .economics-metrics,
+  .save-view-form {
     grid-template-columns: 1fr;
+  }
+
+  .saved-views .section-heading span {
+    max-width: none;
+    text-align: left;
   }
 
   .score-component {
