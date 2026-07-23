@@ -23,6 +23,7 @@
     "format:check": "prettier --check .",
     "typecheck": "npm run build --workspace @public-scanner/domain && npm run build --workspace @public-scanner/connectors && npm run build --workspace @public-scanner/db && npm run typecheck --workspaces --if-present",
     "test": "npm run build --workspace @public-scanner/domain && npm run build --workspace @public-scanner/connectors && npm run build --workspace @public-scanner/db && vitest run",
+    "test:e2e": "playwright test",
     "dev:api": "npm run dev --workspace @public-scanner/api",
     "dev:web": "npm run dev --workspace @public-scanner/web",
     "dev:worker": "npm run dev --workspace @public-scanner/worker",
@@ -33,6 +34,7 @@
     "deploy:prod": "sh scripts/deploy.sh"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/node": "^26.1.1",
     "prettier": "^3.9.6",
     "tsx": "^4.23.1",

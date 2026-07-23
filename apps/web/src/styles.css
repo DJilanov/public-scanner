@@ -279,6 +279,7 @@ textarea:focus-visible {
 .auth-signal-grid span,
 .auth-card label span,
 .filters span,
+.pipeline-market-controls label span,
 .pipeline-form label span,
 .economics-form label span,
 .save-view-form label span,
@@ -331,6 +332,7 @@ textarea:focus-visible {
 
 .auth-card label,
 .filters label,
+.pipeline-market-controls label,
 .pipeline-form label,
 .economics-form label,
 .save-view-form label {
@@ -341,6 +343,7 @@ textarea:focus-visible {
 .auth-card input,
 .filters input,
 .filters select,
+.pipeline-market-controls select,
 .pipeline-form input,
 .pipeline-form select,
 .pipeline-form textarea,
@@ -691,6 +694,22 @@ textarea:focus-visible {
 .settings-panel h3 {
   margin: 0;
   font-size: 1rem;
+}
+
+.pipeline-market-panel {
+  margin-bottom: 18px;
+}
+
+.pipeline-market-controls {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.pipeline-market-controls .secondary-action {
+  min-width: 190px;
+  justify-self: end;
 }
 
 .dashboard-grid {
@@ -1626,6 +1645,15 @@ meter {
 
   .filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pipeline-market-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .pipeline-market-controls .secondary-action {
+    width: 100%;
+    justify-self: stretch;
   }
 
   .market-grid,

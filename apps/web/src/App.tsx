@@ -1,5 +1,6 @@
 import {
   type FormEvent,
+  type MouseEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -88,6 +89,20 @@ type AppView =
   | "sources"
   | "profile";
 
+const APP_VIEWS: readonly AppView[] = [
+  "overview",
+  "opportunities",
+  "pipeline",
+  "documents",
+  "apply-studio",
+  "buyers",
+  "competitors",
+  "contracts",
+  "alerts",
+  "sources",
+  "profile"
+];
+
 interface AuthUser {
   id: string;
   email: string;
@@ -112,6 +127,11 @@ interface MarketFilterState {
   selectedCountryCodes: SupportedCountryCode[];
   includeInternationalSources: boolean;
   selectedInternationalSourceIds: string[];
+}
+
+interface PipelineMarketScope {
+  countryCode: "" | SupportedCountryCode;
+  includeInternationalSources: boolean;
 }
 
 interface LoginForm {
@@ -273,6 +293,10 @@ const DEFAULT_MARKET_FILTERS: MarketFilterState = {
   selectedCountryCodes: DEFAULT_SELECTED_COUNTRY_CODES,
   includeInternationalSources: false,
   selectedInternationalSourceIds: INTERNATIONAL_SOURCE_IDS
+};
+const DEFAULT_PIPELINE_MARKET_SCOPE: PipelineMarketScope = {
+  countryCode: "",
+  includeInternationalSources: DEFAULT_MARKET_FILTERS.includeInternationalSources
 };
 const INTERNATIONAL_SOURCES = SOURCE_CATALOG.filter((source) => source.isInternational);
 const COUNTRY_NAMES_BG: Record<SupportedCountryCode, string> = {
@@ -522,12 +546,23 @@ const TRANSLATIONS = {
     marketSelection: "Market selection",
     marketSelectionBody:
       "Choose the countries that should appear across opportunities, buyer analysis, contracts, and source health.",
+    market: "Market",
     homeMarket: "Home market",
     balkanMarkets: "Regional markets",
     globalMarkets: "Global markets",
+    allSelectedMarkets: "All selected markets",
+    internationalMarket: "International",
     internationalSources: "International sources",
     internationalSourcesBody:
       "Allow global portals when they do not expose a selected-country signal yet.",
+    pipelineMarketScope: "Pipeline market scope",
+    pipelineMarketScopeBody:
+      "Focus saved bids by the market you are actively working without changing the global profile filters.",
+    includeGlobalRecords: "Include global records",
+    globalRecordsPaused: "Global records paused",
+    globalRecordsDisabled:
+      "Global records are paused in profile settings, so this pipeline scope only uses selected countries.",
+    pipelineItems: "pipeline items",
     resetMarkets: "Reset markets",
     selectedCount: "selected",
     selectAtLeastOneSector: "Select at least one sector to keep the scanner useful.",
@@ -882,12 +917,23 @@ const TRANSLATIONS = {
     marketSelection: "Избор на пазари",
     marketSelectionBody:
       "Избери държавите, които да се виждат във възможности, анализ на възложители, договори и източници.",
+    market: "Пазар",
     homeMarket: "Основен пазар",
     balkanMarkets: "Регионални пазари",
     globalMarkets: "Глобални пазари",
+    allSelectedMarkets: "Всички избрани пазари",
+    internationalMarket: "Международен",
     internationalSources: "Международни източници",
     internationalSourcesBody:
       "Разрешава глобални портали, когато още нямат ясен сигнал за избрана държава.",
+    pipelineMarketScope: "Пазарен обхват на процеса",
+    pipelineMarketScopeBody:
+      "Фокусирай запазените участия по пазара, върху който работиш, без да променяш глобалните настройки на профила.",
+    includeGlobalRecords: "Включи глобални записи",
+    globalRecordsPaused: "Глобалните записи са паузирани",
+    globalRecordsDisabled:
+      "Глобалните записи са паузирани в настройките на профила, затова този обхват използва само избраните държави.",
+    pipelineItems: "елемента в процеса",
     resetMarkets: "Върни пазарите",
     selectedCount: "избрани",
     selectAtLeastOneSector: "Избери поне един сектор, за да остане скенерът полезен.",
@@ -1343,7 +1389,7 @@ export function App() {
     string[]
   >(getInitialSelectedInternationalSourceIds);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
-  const [activeView, setActiveView] = useState<AppView>("overview");
+  const [activeView, setActiveView] = useState<AppView>(getInitialAppView);
   const [profiles, setProfiles] = useState<BusinessProfile[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [dashboard, setDashboard] = useState<ProcurementDashboard>(EMPTY_DASHBOARD);
@@ -1373,6 +1419,9 @@ export function App() {
     useState<EconomicsForm>(DEFAULT_ECONOMICS_FORM);
   const [alertForm, setAlertForm] = useState<AlertForm>(DEFAULT_ALERT_FORM);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [pipelineMarketScope, setPipelineMarketScope] = useState<PipelineMarketScope>(
+    getInitialPipelineMarketScope
+  );
   const [savedOpportunityViews, setSavedOpportunityViews] = useState<
     SavedOpportunityView[]
   >(getInitialSavedOpportunityViews);
@@ -1419,10 +1468,32 @@ export function App() {
 
   useEffect(() => {
     window.localStorage.setItem(
+      "public-scanner-pipeline-market-scope",
+      JSON.stringify(pipelineMarketScope)
+    );
+  }, [pipelineMarketScope]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
       "public-scanner-saved-opportunity-views",
       JSON.stringify(savedOpportunityViews)
     );
   }, [savedOpportunityViews]);
+
+  useEffect(() => {
+    const syncViewFromHash = (): void => {
+      setActiveView(getAppViewFromHash(window.location.hash) ?? "overview");
+    };
+
+    syncViewFromHash();
+    window.addEventListener("hashchange", syncViewFromHash);
+    window.addEventListener("popstate", syncViewFromHash);
+
+    return () => {
+      window.removeEventListener("hashchange", syncViewFromHash);
+      window.removeEventListener("popstate", syncViewFromHash);
+    };
+  }, []);
 
   const clearDashboardState = useCallback(() => {
     setProfiles([]);
@@ -1618,6 +1689,34 @@ export function App() {
     }),
     [includeInternationalSources, selectedCountryCodes, selectedInternationalSourceIds]
   );
+
+  useEffect(() => {
+    if (!preferencesLoaded) {
+      return;
+    }
+
+    setPipelineMarketScope((current) => {
+      const countryCode =
+        current.countryCode && selectedCountryCodes.includes(current.countryCode)
+          ? current.countryCode
+          : "";
+      const scopedInternationalSources = includeInternationalSources
+        ? current.includeInternationalSources
+        : false;
+
+      if (
+        current.countryCode === countryCode &&
+        current.includeInternationalSources === scopedInternationalSources
+      ) {
+        return current;
+      }
+
+      return {
+        countryCode,
+        includeInternationalSources: scopedInternationalSources
+      };
+    });
+  }, [includeInternationalSources, preferencesLoaded, selectedCountryCodes]);
 
   const loadOpportunities = useCallback(
     async (signal?: AbortSignal) => {
@@ -1903,6 +2002,11 @@ export function App() {
         filters.funding === "eu-funded" ? opportunity.isEuFunded : true
       ),
     [filters.funding, rankedOpportunities]
+  );
+  const scopedPipelineItems = useMemo(
+    () =>
+      filterPipelineItemsByMarket(dashboard.pipeline, pipelineMarketScope, marketFilters),
+    [dashboard.pipeline, marketFilters, pipelineMarketScope]
   );
 
   useEffect(() => {
@@ -2491,10 +2595,28 @@ export function App() {
     loadOpportunities,
     selectedOpportunityId
   ]);
-  const openOpportunityDossier = useCallback((opportunityId: string) => {
-    setSelectedOpportunityId(opportunityId);
-    setActiveView("opportunities");
+  const navigateToView = useCallback((view: AppView) => {
+    setActiveView(view);
+
+    const nextHash = `#${view}`;
+    if (window.location.hash !== nextHash) {
+      window.history.pushState(null, "", nextHash);
+    }
   }, []);
+  const handleNavClick = useCallback(
+    (event: MouseEvent<HTMLAnchorElement>, view: AppView) => {
+      event.preventDefault();
+      navigateToView(view);
+    },
+    [navigateToView]
+  );
+  const openOpportunityDossier = useCallback(
+    (opportunityId: string) => {
+      setSelectedOpportunityId(opportunityId);
+      navigateToView("opportunities");
+    },
+    [navigateToView]
+  );
 
   if (authState !== "authenticated") {
     return (
@@ -2521,83 +2643,83 @@ export function App() {
           <h1>{t(locale, "productTitle")}</h1>
         </div>
         <nav>
-          <button
-            type="button"
+          <a
+            href="#overview"
             aria-current={activeView === "overview" ? "page" : undefined}
-            onClick={() => setActiveView("overview")}
+            onClick={(event) => handleNavClick(event, "overview")}
           >
             {t(locale, "navOverview")}
-          </button>
-          <button
-            type="button"
+          </a>
+          <a
+            href="#opportunities"
             aria-current={activeView === "opportunities" ? "page" : undefined}
-            onClick={() => setActiveView("opportunities")}
+            onClick={(event) => handleNavClick(event, "opportunities")}
           >
             {t(locale, "navOpportunities")}
-          </button>
-          <button
-            type="button"
+          </a>
+          <a
+            href="#pipeline"
             aria-current={activeView === "pipeline" ? "page" : undefined}
-            onClick={() => setActiveView("pipeline")}
+            onClick={(event) => handleNavClick(event, "pipeline")}
           >
             {t(locale, "navPipeline")}
-          </button>
-          <button
-            type="button"
+          </a>
+          <a
+            href="#documents"
             aria-current={activeView === "documents" ? "page" : undefined}
-            onClick={() => setActiveView("documents")}
+            onClick={(event) => handleNavClick(event, "documents")}
           >
             {t(locale, "navDocuments")}
-          </button>
-          <button
-            type="button"
+          </a>
+          <a
+            href="#apply-studio"
             aria-current={activeView === "apply-studio" ? "page" : undefined}
-            onClick={() => setActiveView("apply-studio")}
+            onClick={(event) => handleNavClick(event, "apply-studio")}
           >
             {t(locale, "navApplyStudio")}
-          </button>
-          <button
-            type="button"
+          </a>
+          <a
+            href="#buyers"
             aria-current={activeView === "buyers" ? "page" : undefined}
-            onClick={() => setActiveView("buyers")}
+            onClick={(event) => handleNavClick(event, "buyers")}
           >
             {t(locale, "navBuyers")}
-          </button>
-          <button
-            type="button"
+          </a>
+          <a
+            href="#competitors"
             aria-current={activeView === "competitors" ? "page" : undefined}
-            onClick={() => setActiveView("competitors")}
+            onClick={(event) => handleNavClick(event, "competitors")}
           >
             {t(locale, "navCompetitors")}
-          </button>
-          <button
-            type="button"
+          </a>
+          <a
+            href="#contracts"
             aria-current={activeView === "contracts" ? "page" : undefined}
-            onClick={() => setActiveView("contracts")}
+            onClick={(event) => handleNavClick(event, "contracts")}
           >
             {t(locale, "navContracts")}
-          </button>
-          <button
-            type="button"
+          </a>
+          <a
+            href="#alerts"
             aria-current={activeView === "alerts" ? "page" : undefined}
-            onClick={() => setActiveView("alerts")}
+            onClick={(event) => handleNavClick(event, "alerts")}
           >
             {t(locale, "navAlerts")}
-          </button>
-          <button
-            type="button"
+          </a>
+          <a
+            href="#sources"
             aria-current={activeView === "sources" ? "page" : undefined}
-            onClick={() => setActiveView("sources")}
+            onClick={(event) => handleNavClick(event, "sources")}
           >
             {t(locale, "navSources")}
-          </button>
-          <button
-            type="button"
+          </a>
+          <a
+            href="#profile"
             aria-current={activeView === "profile" ? "page" : undefined}
-            onClick={() => setActiveView("profile")}
+            onClick={(event) => handleNavClick(event, "profile")}
           >
             {t(locale, "navProfile")}
-          </button>
+          </a>
         </nav>
         <div className="sidebar-footer">
           <LanguageSwitch locale={locale} onChangeLocale={changeLocale} />
@@ -2848,8 +2970,11 @@ export function App() {
       {activeView === "pipeline" ? (
         <PipelinePage
           dashboardLoadState={dashboardLoadState}
-          items={dashboard.pipeline}
+          items={scopedPipelineItems}
           locale={locale}
+          marketFilters={marketFilters}
+          marketScope={pipelineMarketScope}
+          onChangeMarketScope={setPipelineMarketScope}
           onOpenOpportunity={openOpportunityDossier}
           onRefresh={refreshWorkspaceData}
         />
@@ -3444,6 +3569,9 @@ interface PipelinePageProps {
   dashboardLoadState: LoadState;
   items: PipelineDashboardItem[];
   locale: Locale;
+  marketFilters: MarketFilterState;
+  marketScope: PipelineMarketScope;
+  onChangeMarketScope(scope: PipelineMarketScope): void;
   onOpenOpportunity(opportunityId: string): void;
   onRefresh(): void;
 }
@@ -3452,6 +3580,9 @@ function PipelinePage({
   dashboardLoadState,
   items,
   locale,
+  marketFilters,
+  marketScope,
+  onChangeMarketScope,
   onOpenOpportunity,
   onRefresh
 }: PipelinePageProps) {
@@ -3464,6 +3595,13 @@ function PipelinePage({
         locale={locale}
         loading={dashboardLoadState === "loading"}
         onRefresh={onRefresh}
+      />
+      <PipelineMarketScopePanel
+        itemCount={items.length}
+        locale={locale}
+        marketFilters={marketFilters}
+        scope={marketScope}
+        onChangeScope={onChangeMarketScope}
       />
       <section className="metrics" aria-label={t(locale, "pipelineTitle")}>
         <Metric
@@ -3493,6 +3631,7 @@ function PipelinePage({
             <tr>
               <th scope="col">{t(locale, "stage")}</th>
               <th scope="col">{t(locale, "opportunity")}</th>
+              <th scope="col">{t(locale, "market")}</th>
               <th scope="col">{t(locale, "owner")}</th>
               <th scope="col">{t(locale, "nextAction")}</th>
               <th scope="col">{t(locale, "dueDate")}</th>
@@ -3501,7 +3640,7 @@ function PipelinePage({
           </thead>
           <tbody>
             {items.length === 0 ? (
-              <EmptyTableRow colSpan={6} label={t(locale, "noPipelineItems")} />
+              <EmptyTableRow colSpan={7} label={t(locale, "noPipelineItems")} />
             ) : (
               items.map((item) => (
                 <tr key={item.opportunity.id}>
@@ -3520,6 +3659,12 @@ function PipelinePage({
                     </button>
                     <span>{item.opportunity.buyerName}</span>
                   </td>
+                  <td>
+                    <span className="source-pill">
+                      {formatOpportunityMarket(item.opportunity, locale)}
+                    </span>
+                    <span>{formatOpportunitySourceName(item.opportunity)}</span>
+                  </td>
                   <td>{item.savedState.owner ?? t(locale, "notStated")}</td>
                   <td>{item.savedState.nextAction ?? t(locale, "noAction")}</td>
                   <td>{formatDate(item.savedState.dueDate, locale)}</td>
@@ -3532,6 +3677,91 @@ function PipelinePage({
           </tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+interface PipelineMarketScopePanelProps {
+  itemCount: number;
+  locale: Locale;
+  marketFilters: MarketFilterState;
+  scope: PipelineMarketScope;
+  onChangeScope(scope: PipelineMarketScope): void;
+}
+
+function PipelineMarketScopePanel({
+  itemCount,
+  locale,
+  marketFilters,
+  scope,
+  onChangeScope
+}: PipelineMarketScopePanelProps) {
+  const availableCountries = normalizeSelectedCountryCodes(
+    marketFilters.selectedCountryCodes
+  );
+  const globalRecordsEnabled = marketFilters.includeInternationalSources;
+
+  return (
+    <section
+      className="settings-panel pipeline-market-panel"
+      aria-label={t(locale, "pipelineMarketScope")}
+    >
+      <div className="section-heading">
+        <div>
+          <h3>{t(locale, "pipelineMarketScope")}</h3>
+          <p className="muted">{t(locale, "pipelineMarketScopeBody")}</p>
+        </div>
+        <span>
+          {itemCount} {t(locale, "pipelineItems")}
+        </span>
+      </div>
+
+      <div className="pipeline-market-controls">
+        <label>
+          <span>{t(locale, "market")}</span>
+          <select
+            aria-label={t(locale, "market")}
+            value={scope.countryCode}
+            onChange={(event) =>
+              onChangeScope({
+                ...scope,
+                countryCode: normalizePipelineScopeCountryCode(
+                  event.target.value,
+                  availableCountries
+                )
+              })
+            }
+          >
+            <option value="">{t(locale, "allSelectedMarkets")}</option>
+            {availableCountries.map((countryCode) => (
+              <option key={countryCode} value={countryCode}>
+                {formatCountryName(countryCode, locale)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <button
+          type="button"
+          className="secondary-action"
+          aria-pressed={scope.includeInternationalSources && globalRecordsEnabled}
+          disabled={!globalRecordsEnabled}
+          onClick={() =>
+            onChangeScope({
+              ...scope,
+              includeInternationalSources: !scope.includeInternationalSources
+            })
+          }
+        >
+          {scope.includeInternationalSources && globalRecordsEnabled
+            ? t(locale, "includeGlobalRecords")
+            : t(locale, "globalRecordsPaused")}
+        </button>
+      </div>
+
+      {!globalRecordsEnabled ? (
+        <p className="muted">{t(locale, "globalRecordsDisabled")}</p>
+      ) : null}
     </section>
   );
 }
@@ -6512,6 +6742,93 @@ function dedupeStrings(values: string[]): string[] {
   return normalized;
 }
 
+function filterPipelineItemsByMarket(
+  items: PipelineDashboardItem[],
+  scope: PipelineMarketScope,
+  marketFilters: MarketFilterState
+): PipelineDashboardItem[] {
+  const scopedCountries = scope.countryCode
+    ? [scope.countryCode]
+    : normalizeSelectedCountryCodes(marketFilters.selectedCountryCodes);
+  const includeGlobalRecords =
+    marketFilters.includeInternationalSources &&
+    scope.includeInternationalSources &&
+    !scope.countryCode;
+  const selectedGlobalSourceIds = normalizeSelectedInternationalSourceIds(
+    marketFilters.selectedInternationalSourceIds
+  );
+
+  return items.filter((item) =>
+    opportunityMatchesMarketScope(
+      item.opportunity,
+      scopedCountries,
+      includeGlobalRecords,
+      selectedGlobalSourceIds
+    )
+  );
+}
+
+function opportunityMatchesMarketScope(
+  opportunity: Opportunity,
+  selectedCountryCodes: SupportedCountryCode[],
+  includeGlobalRecords: boolean,
+  selectedGlobalSourceIds: string[]
+): boolean {
+  const opportunityCountryCodes = getOpportunityMarketCountryCodes(opportunity);
+
+  if (
+    opportunityCountryCodes.some((countryCode) =>
+      selectedCountryCodes.includes(countryCode)
+    )
+  ) {
+    return true;
+  }
+
+  if (!includeGlobalRecords || opportunityCountryCodes.length > 0) {
+    return false;
+  }
+
+  return Boolean(
+    opportunity.sourceId && selectedGlobalSourceIds.includes(opportunity.sourceId)
+  );
+}
+
+function getOpportunityMarketCountryCodes(
+  opportunity: Opportunity
+): SupportedCountryCode[] {
+  return [
+    ...new Set(
+      [
+        opportunity.buyerCountryCode,
+        opportunity.sourceCountryCode,
+        ...(opportunity.placeOfPerformanceCountryCodes ?? [])
+      ].filter((countryCode): countryCode is SupportedCountryCode => Boolean(countryCode))
+    )
+  ];
+}
+
+function formatOpportunityMarket(opportunity: Opportunity, locale: Locale): string {
+  const countryCodes = getOpportunityMarketCountryCodes(opportunity);
+  if (countryCodes.length > 0) {
+    return countryCodes
+      .map((countryCode) => formatCountryName(countryCode, locale))
+      .join(", ");
+  }
+
+  return opportunity.sourceId && INTERNATIONAL_SOURCE_IDS.includes(opportunity.sourceId)
+    ? t(locale, "internationalMarket")
+    : t(locale, "unknown");
+}
+
+function formatOpportunitySourceName(opportunity: Opportunity): string {
+  return (
+    opportunity.sourceDisplayName ??
+    SOURCE_CATALOG.find((source) => source.id === opportunity.sourceId)?.displayName ??
+    opportunity.sourceId ??
+    opportunity.source.toUpperCase()
+  );
+}
+
 function buildOpportunityUrl(
   filters: Filters,
   selectedProfileIds: BusinessProfileId[],
@@ -6570,6 +6887,20 @@ function appendMarketQueryParams(
       marketFilters.selectedInternationalSourceIds
     ).join(",")
   );
+}
+
+function getInitialAppView(): AppView {
+  return getAppViewFromHash(window.location.hash) ?? "overview";
+}
+
+function getAppViewFromHash(hash: string): AppView | undefined {
+  const view = hash.replace(/^#\/?/, "").split("?")[0]?.trim();
+
+  return view && isAppView(view) ? view : undefined;
+}
+
+function isAppView(value: string): value is AppView {
+  return APP_VIEWS.includes(value as AppView);
 }
 
 function getInitialThemePreference(): ThemePreference {
@@ -6644,6 +6975,19 @@ function getInitialSelectedInternationalSourceIds(): string[] {
     return normalizeSelectedInternationalSourceIds(JSON.parse(stored) as unknown);
   } catch {
     return DEFAULT_MARKET_FILTERS.selectedInternationalSourceIds;
+  }
+}
+
+function getInitialPipelineMarketScope(): PipelineMarketScope {
+  const stored = window.localStorage.getItem("public-scanner-pipeline-market-scope");
+  if (!stored) {
+    return DEFAULT_PIPELINE_MARKET_SCOPE;
+  }
+
+  try {
+    return normalizePipelineMarketScope(JSON.parse(stored) as unknown);
+  } catch {
+    return DEFAULT_PIPELINE_MARKET_SCOPE;
   }
 }
 
@@ -6735,6 +7079,39 @@ function normalizeSelectedInternationalSourceIds(value: unknown): string[] {
   return normalized.length > 0
     ? normalized
     : DEFAULT_MARKET_FILTERS.selectedInternationalSourceIds;
+}
+
+function normalizePipelineMarketScope(value: unknown): PipelineMarketScope {
+  if (!value || typeof value !== "object") {
+    return DEFAULT_PIPELINE_MARKET_SCOPE;
+  }
+
+  const candidate = value as Partial<PipelineMarketScope>;
+  const rawCountryCode =
+    typeof candidate.countryCode === "string"
+      ? candidate.countryCode.trim().toUpperCase()
+      : "";
+
+  return {
+    countryCode: isSupportedCountryCode(rawCountryCode) ? rawCountryCode : "",
+    includeInternationalSources: Boolean(candidate.includeInternationalSources)
+  };
+}
+
+function normalizePipelineScopeCountryCode(
+  value: string,
+  availableCountryCodes: SupportedCountryCode[]
+): "" | SupportedCountryCode {
+  const countryCode = value.trim().toUpperCase();
+
+  return isSupportedCountryCode(countryCode) &&
+    availableCountryCodes.includes(countryCode)
+    ? countryCode
+    : "";
+}
+
+function isSupportedCountryCode(value: string): value is SupportedCountryCode {
+  return SUPPORTED_COUNTRIES.some((country) => country.code === value);
 }
 
 function normalizeFilters(value: Partial<Filters> | undefined): Filters {
