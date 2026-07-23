@@ -1,0 +1,1113 @@
+import type {
+  BuyerDashboardItem,
+  ContractAmendmentSummary,
+  ContractDashboardItem,
+  ContractSummary,
+  DocumentReviewItem,
+  DocumentIntelligence,
+  MatchReason,
+  Money,
+  NormalizedOpportunityWithScore,
+  Opportunity,
+  OpportunityDetail,
+  OpportunityLot,
+  PipelineDashboardItem,
+  ProcurementDashboard,
+  ProfileFitScore,
+  SavedOpportunityState,
+  SourceHealthItem,
+  SupplierDashboardItem
+} from "@public-scanner/domain";
+import type { QueryResultRow } from "pg";
+
+import type { Queryable } from "../client.js";
+import type {
+  CompetitorInsightRow,
+  ContractAmendmentRow,
+  ContractSummaryRow,
+  DocumentIntelligenceRow,
+  OpportunityListFilters,
+  OpportunityLotRow,
+  OpportunityRepositoryPort,
+  OpportunityRow,
+  PipelineStateInput,
+  SavedOpportunityRow,
+  UpsertOpportunityResult
+} from "../types.js";
+
+interface UpsertOpportunityRow extends QueryResultRow {
+  id: string;
+  inserted: boolean;
+}
+
+interface DashboardDocumentColumns {
+  document_status: DocumentIntelligence["status"] | null;
+  document_summary: string | null;
+  document_eligibility_criteria: string[] | null;
+  document_required_documents: string[] | null;
+  document_certifications: string[] | null;
+  document_risks: string[] | null;
+  document_extracted_at: Date | string | null;
+}
+
+interface PipelineDashboardRow
+  extends OpportunityRow, SavedOpportunityRow, DashboardDocumentColumns {}
+
+interface DocumentReviewDashboardRow extends OpportunityRow, DashboardDocumentColumns {
+  saved_stage: SavedOpportunityState["stage"] | null;
+  saved_owner: string | null;
+  saved_notes: string | null;
+  saved_next_action: string | null;
+  saved_due_date: Date | string | null;
+  saved_decision_reason: string | null;
+}
+
+interface ContractDashboardRow extends QueryResultRow {
+  id: string;
+  source: ContractDashboardItem["source"];
+  title: string;
+  buyer_name: string;
+  supplier_name: string | null;
+  supplier_registry_number: string | null;
+  contract_number: string | null;
+  contract_date: Date | string | null;
+  value: string | null;
+  currency: string | null;
+  opportunity_id: string | null;
+  opportunity_title: string | null;
+  cpv_codes: string[] | null;
+}
+
+interface BuyerDashboardRow extends QueryResultRow {
+  buyer_name: string;
+  opportunity_count: string;
+  open_opportunity_count: string;
+  contract_count: string;
+  total_awarded_value: string | null;
+  average_awarded_value: string | null;
+  currency: string | null;
+  last_activity_date: Date | string | null;
+  top_suppliers: string[] | null;
+  top_cpv_codes: string[] | null;
+}
+
+interface SupplierDashboardRow extends QueryResultRow {
+  supplier_name: string;
+  wins_count: string;
+  buyer_count: string;
+  total_value: string | null;
+  average_value: string | null;
+  currency: string | null;
+  last_win_date: Date | string | null;
+  top_buyers: string[] | null;
+  top_cpv_codes: string[] | null;
+}
+
+interface SourceHealthRow extends QueryResultRow {
+  source: SourceHealthItem["source"];
+  status: SourceHealthItem["status"] | null;
+  started_at: Date | string | null;
+  finished_at: Date | string | null;
+  fetched_count: number | null;
+  inserted_count: number | null;
+  updated_count: number | null;
+  skipped_count: number | null;
+  failed_count: number | null;
+  recent_error_count: string | null;
+  error_message: string | null;
+}
+
+export class OpportunityRepository implements OpportunityRepositoryPort {
+  public constructor(private readonly db: Queryable) {}
+
+  public async list(filters: OpportunityListFilters = {}): Promise<Opportunity[]> {
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    const profileIds = filters.profileIds?.length ? filters.profileIds : undefined;
+    const profileIdsIndex = profileIds ? values.push(profileIds) : undefined;
+    const selectedProfileScoreSql = profileIdsIndex
+      ? `(
+          SELECT MAX((profile_score->>'totalScore')::integer)
+          FROM jsonb_array_elements(m.profile_scores) AS profile_score
+          WHERE profile_score->>'profileId' = ANY($${profileIdsIndex}::text[])
+        )`
+      : "NULL::integer";
+    const rankingScoreSql = `coalesce(${selectedProfileScoreSql}, m.score, 0)`;
+
+    if (filters.status) {
+      values.push(filters.status);
+      conditions.push(`o.status = $${values.length}`);
+    }
+
+    if (filters.source) {
+      values.push(filters.source);
+      conditions.push(`o.source = $${values.length}`);
+    }
+
+    if (filters.minScore !== undefined) {
+      values.push(filters.minScore);
+      conditions.push(`${rankingScoreSql} >= $${values.length}`);
+    }
+
+    if (filters.search) {
+      values.push(`%${filters.search}%`);
+      const index = values.length;
+      conditions.push(
+        `(o.title ILIKE $${index} OR o.buyer_name ILIKE $${index} OR EXISTS (
+          SELECT 1 FROM unnest(o.cpv_codes) AS cpv(code)
+          WHERE cpv.code ILIKE replace($${index}, '%', '') || '%'
+        ))`
+      );
+    }
+
+    if (filters.buyer) {
+      values.push(`%${filters.buyer}%`);
+      conditions.push(`o.buyer_name ILIKE $${values.length}`);
+    }
+
+    if (filters.cpvPrefix) {
+      values.push(`${filters.cpvPrefix}%`);
+      conditions.push(`EXISTS (
+        SELECT 1 FROM unnest(o.cpv_codes) AS cpv(code)
+        WHERE cpv.code ILIKE $${values.length}
+      )`);
+    }
+
+    if (filters.deadlineFrom) {
+      values.push(filters.deadlineFrom);
+      conditions.push(`o.submission_deadline >= $${values.length}`);
+    }
+
+    if (filters.deadlineTo) {
+      values.push(filters.deadlineTo);
+      conditions.push(`o.submission_deadline <= $${values.length}`);
+    }
+
+    values.push(clampLimit(filters.limit));
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const result = await this.db.query<OpportunityRow>(
+      `
+        WITH filtered AS (
+          SELECT
+            o.*,
+            m.score,
+            m.reasons,
+            m.profile_scores,
+            ${selectedProfileScoreSql} AS selected_profile_score,
+            row_number() OVER (
+              PARTITION BY o.deduplication_key
+              ORDER BY
+                CASE o.source
+                  WHEN 'cais-eop' THEN 1
+                  WHEN 'ted' THEN 2
+                  ELSE 3
+                END,
+                ${rankingScoreSql} DESC,
+                o.publication_date DESC NULLS LAST
+            ) AS dedupe_rank
+          FROM opportunities o
+          LEFT JOIN opportunity_matches m ON m.opportunity_id = o.id
+          ${where}
+        )
+        SELECT *
+        FROM filtered
+        WHERE dedupe_rank = 1
+        ORDER BY
+          coalesce(selected_profile_score, score, 0) DESC,
+          submission_deadline ASC NULLS LAST,
+          publication_date DESC NULLS LAST
+        LIMIT $${values.length}
+      `,
+      values
+    );
+
+    return result.rows.map(mapOpportunityRow);
+  }
+
+  public async getById(id: string): Promise<Opportunity | undefined> {
+    const result = await this.db.query<OpportunityRow>(
+      `
+        SELECT
+          o.*,
+          m.score,
+          m.reasons,
+          m.profile_scores
+        FROM opportunities o
+        LEFT JOIN opportunity_matches m ON m.opportunity_id = o.id
+        WHERE o.id = $1
+      `,
+      [id]
+    );
+
+    const row = result.rows[0];
+    return row ? mapOpportunityRow(row) : undefined;
+  }
+
+  public async getDetailById(id: string): Promise<OpportunityDetail | undefined> {
+    const opportunity = await this.getById(id);
+    if (!opportunity) {
+      return undefined;
+    }
+
+    const [
+      lotsResult,
+      contractsResult,
+      amendmentsResult,
+      savedResult,
+      documentIntelligenceResult,
+      competitorInsightsResult
+    ] = await Promise.all([
+      this.db.query<OpportunityLotRow>(
+        `
+          SELECT
+            id,
+            lot_identifier,
+            title,
+            cpv_codes,
+            estimated_value,
+            currency,
+            submission_deadline
+          FROM opportunity_lots
+          WHERE opportunity_id = $1
+          ORDER BY lot_identifier ASC NULLS LAST, title ASC NULLS LAST
+        `,
+        [id]
+      ),
+      this.db.query<ContractSummaryRow>(
+        `
+          SELECT
+            id,
+            supplier_name,
+            supplier_registry_number,
+            contract_number,
+            contract_date,
+            title,
+            value,
+            currency
+          FROM contracts
+          WHERE opportunity_id = $1
+          ORDER BY contract_date DESC NULLS LAST
+          LIMIT 20
+        `,
+        [id]
+      ),
+      this.db.query<ContractAmendmentRow>(
+        `
+          SELECT
+            a.id,
+            a.previous_value,
+            a.current_value,
+            a.currency,
+            a.change_reason,
+            a.change_description
+          FROM contract_amendments a
+          INNER JOIN contracts c ON c.id = a.contract_id
+          WHERE c.opportunity_id = $1
+          ORDER BY a.created_at DESC
+          LIMIT 20
+        `,
+        [id]
+      ),
+      this.db.query<SavedOpportunityRow>(
+        `
+          SELECT
+            stage,
+            owner,
+            notes,
+            next_action,
+            due_date,
+            decision_reason
+          FROM saved_opportunities
+          WHERE opportunity_id = $1 AND user_key = 'default'
+          LIMIT 1
+        `,
+        [id]
+      ),
+      this.db.query<DocumentIntelligenceRow>(
+        `
+          SELECT
+            status,
+            summary,
+            eligibility_criteria,
+            required_documents,
+            certifications,
+            risks,
+            extracted_at
+          FROM document_intelligence
+          WHERE opportunity_id = $1
+          LIMIT 1
+        `,
+        [id]
+      ),
+      this.db.query<CompetitorInsightRow>(
+        `
+          SELECT
+            supplier_name,
+            count(*)::text AS wins_count,
+            sum(value)::text AS total_value,
+            currency,
+            max(contract_date) AS last_win_date
+          FROM contracts
+          WHERE buyer_name = $1
+            AND supplier_name IS NOT NULL
+            AND supplier_name <> ''
+          GROUP BY supplier_name, currency
+          ORDER BY count(*) DESC, max(contract_date) DESC NULLS LAST
+          LIMIT 8
+        `,
+        [opportunity.buyerName]
+      )
+    ]);
+
+    const savedRow = savedResult.rows[0];
+    const documentIntelligenceRow = documentIntelligenceResult.rows[0];
+
+    return {
+      opportunity,
+      lots: lotsResult.rows.map(mapOpportunityLotRow),
+      contracts: contractsResult.rows.map(mapContractSummaryRow),
+      amendments: amendmentsResult.rows.map(mapContractAmendmentRow),
+      ...(savedRow ? { savedState: mapSavedOpportunityRow(savedRow) } : {}),
+      documentIntelligence: documentIntelligenceRow
+        ? mapDocumentIntelligenceRow(documentIntelligenceRow)
+        : emptyDocumentIntelligence(),
+      competitorInsights: competitorInsightsResult.rows.map(mapCompetitorInsightRow)
+    };
+  }
+
+  public async getDashboard(): Promise<ProcurementDashboard> {
+    const [
+      pipelineResult,
+      documentResult,
+      contractResult,
+      buyerResult,
+      supplierResult,
+      sourceResult
+    ] = await Promise.all([
+      this.db.query<PipelineDashboardRow>(
+        `
+          SELECT
+            o.*,
+            m.score,
+            m.reasons,
+            m.profile_scores,
+            s.stage,
+            s.owner,
+            s.notes,
+            s.next_action,
+            s.due_date,
+            s.decision_reason,
+            di.status AS document_status,
+            di.summary AS document_summary,
+            di.eligibility_criteria AS document_eligibility_criteria,
+            di.required_documents AS document_required_documents,
+            di.certifications AS document_certifications,
+            di.risks AS document_risks,
+            di.extracted_at AS document_extracted_at
+          FROM saved_opportunities s
+          INNER JOIN opportunities o ON o.id = s.opportunity_id
+          LEFT JOIN opportunity_matches m ON m.opportunity_id = o.id
+          LEFT JOIN document_intelligence di ON di.opportunity_id = o.id
+          WHERE s.user_key = 'default'
+          ORDER BY
+            CASE s.stage
+              WHEN 'reviewing' THEN 1
+              WHEN 'preparing' THEN 2
+              WHEN 'submitted' THEN 3
+              WHEN 'watching' THEN 4
+              WHEN 'won' THEN 5
+              WHEN 'lost' THEN 6
+              ELSE 7
+            END,
+            s.due_date ASC NULLS LAST,
+            o.submission_deadline ASC NULLS LAST,
+            o.publication_date DESC NULLS LAST
+          LIMIT 200
+        `
+      ),
+      this.db.query<DocumentReviewDashboardRow>(
+        `
+          SELECT
+            o.*,
+            m.score,
+            m.reasons,
+            m.profile_scores,
+            s.stage AS saved_stage,
+            s.owner AS saved_owner,
+            s.notes AS saved_notes,
+            s.next_action AS saved_next_action,
+            s.due_date AS saved_due_date,
+            s.decision_reason AS saved_decision_reason,
+            di.status AS document_status,
+            di.summary AS document_summary,
+            di.eligibility_criteria AS document_eligibility_criteria,
+            di.required_documents AS document_required_documents,
+            di.certifications AS document_certifications,
+            di.risks AS document_risks,
+            di.extracted_at AS document_extracted_at
+          FROM opportunities o
+          LEFT JOIN opportunity_matches m ON m.opportunity_id = o.id
+          LEFT JOIN saved_opportunities s
+            ON s.opportunity_id = o.id AND s.user_key = 'default'
+          LEFT JOIN document_intelligence di ON di.opportunity_id = o.id
+          WHERE o.status IN ('forthcoming', 'open')
+             OR s.stage IN ('watching', 'reviewing', 'preparing', 'submitted')
+          ORDER BY
+            CASE coalesce(di.status, 'not-available')
+              WHEN 'failed' THEN 1
+              WHEN 'pending' THEN 2
+              WHEN 'not-available' THEN 3
+              ELSE 4
+            END,
+            jsonb_array_length(coalesce(di.risks, '[]'::jsonb)) DESC,
+            o.submission_deadline ASC NULLS LAST,
+            coalesce(m.score, 0) DESC
+          LIMIT 250
+        `
+      ),
+      this.db.query<ContractDashboardRow>(
+        `
+          SELECT
+            c.id,
+            c.source,
+            c.title,
+            c.buyer_name,
+            c.supplier_name,
+            c.supplier_registry_number,
+            c.contract_number,
+            c.contract_date,
+            c.value,
+            c.currency,
+            o.id AS opportunity_id,
+            o.title AS opportunity_title,
+            o.cpv_codes
+          FROM contracts c
+          LEFT JOIN opportunities o ON o.id = c.opportunity_id
+          ORDER BY c.contract_date DESC NULLS LAST, c.created_at DESC
+          LIMIT 250
+        `
+      ),
+      this.db.query<BuyerDashboardRow>(
+        `
+          WITH opportunity_stats AS (
+            SELECT
+              o.buyer_name,
+              count(DISTINCT o.id)::text AS opportunity_count,
+              count(DISTINCT o.id) FILTER (
+                WHERE o.status IN ('forthcoming', 'open')
+              )::text AS open_opportunity_count,
+              max(coalesce(o.submission_deadline, o.publication_date, o.updated_at)) AS last_opportunity_at,
+              array_remove(array_agg(DISTINCT cpv_code), NULL) AS top_cpv_codes
+            FROM opportunities o
+            LEFT JOIN LATERAL unnest(o.cpv_codes) AS cpv_code ON true
+            GROUP BY o.buyer_name
+          ),
+          contract_stats AS (
+            SELECT
+              c.buyer_name,
+              count(*)::text AS contract_count,
+              CASE
+                WHEN count(DISTINCT c.currency) FILTER (
+                  WHERE c.value IS NOT NULL AND c.currency IS NOT NULL
+                ) = 1
+                THEN sum(c.value)::text
+              END AS total_awarded_value,
+              CASE
+                WHEN count(DISTINCT c.currency) FILTER (
+                  WHERE c.value IS NOT NULL AND c.currency IS NOT NULL
+                ) = 1
+                THEN avg(c.value)::text
+              END AS average_awarded_value,
+              CASE
+                WHEN count(DISTINCT c.currency) FILTER (
+                  WHERE c.value IS NOT NULL AND c.currency IS NOT NULL
+                ) = 1
+                THEN max(c.currency)
+              END AS currency,
+              max(c.contract_date) AS last_contract_date,
+              array_remove(array_agg(DISTINCT c.supplier_name), NULL) AS top_suppliers
+            FROM contracts c
+            GROUP BY c.buyer_name
+          ),
+          buyers AS (
+            SELECT buyer_name FROM opportunity_stats
+            UNION
+            SELECT buyer_name FROM contract_stats
+          )
+          SELECT
+            b.buyer_name,
+            coalesce(os.opportunity_count, '0') AS opportunity_count,
+            coalesce(os.open_opportunity_count, '0') AS open_opportunity_count,
+            coalesce(cs.contract_count, '0') AS contract_count,
+            cs.total_awarded_value,
+            cs.average_awarded_value,
+            cs.currency,
+            greatest(os.last_opportunity_at, cs.last_contract_date::timestamptz) AS last_activity_date,
+            coalesce(cs.top_suppliers, ARRAY[]::text[]) AS top_suppliers,
+            coalesce(os.top_cpv_codes, ARRAY[]::text[]) AS top_cpv_codes
+          FROM buyers b
+          LEFT JOIN opportunity_stats os ON os.buyer_name = b.buyer_name
+          LEFT JOIN contract_stats cs ON cs.buyer_name = b.buyer_name
+          ORDER BY
+            coalesce(os.open_opportunity_count, '0')::integer DESC,
+            coalesce(cs.contract_count, '0')::integer DESC,
+            b.buyer_name ASC
+          LIMIT 150
+        `
+      ),
+      this.db.query<SupplierDashboardRow>(
+        `
+          SELECT
+            c.supplier_name,
+            count(*)::text AS wins_count,
+            count(DISTINCT c.buyer_name)::text AS buyer_count,
+            CASE
+              WHEN count(DISTINCT c.currency) FILTER (
+                WHERE c.value IS NOT NULL AND c.currency IS NOT NULL
+              ) = 1
+              THEN sum(c.value)::text
+            END AS total_value,
+            CASE
+              WHEN count(DISTINCT c.currency) FILTER (
+                WHERE c.value IS NOT NULL AND c.currency IS NOT NULL
+              ) = 1
+              THEN avg(c.value)::text
+            END AS average_value,
+            CASE
+              WHEN count(DISTINCT c.currency) FILTER (
+                WHERE c.value IS NOT NULL AND c.currency IS NOT NULL
+              ) = 1
+              THEN max(c.currency)
+            END AS currency,
+            max(c.contract_date) AS last_win_date,
+            array_remove(array_agg(DISTINCT c.buyer_name), NULL) AS top_buyers,
+            ARRAY(
+              SELECT DISTINCT cpv_code
+              FROM contracts c2
+              INNER JOIN opportunities o2 ON o2.id = c2.opportunity_id
+              CROSS JOIN LATERAL unnest(o2.cpv_codes) AS cpv_code
+              WHERE c2.supplier_name = c.supplier_name
+              LIMIT 8
+            ) AS top_cpv_codes
+          FROM contracts c
+          WHERE c.supplier_name IS NOT NULL
+            AND c.supplier_name <> ''
+          GROUP BY c.supplier_name
+          ORDER BY count(*) DESC, max(c.contract_date) DESC NULLS LAST
+          LIMIT 150
+        `
+      ),
+      this.db.query<SourceHealthRow>(
+        `
+          WITH sources(source) AS (
+            VALUES ('cais-eop'), ('ted'), ('sedia')
+          )
+          SELECT
+            sources.source,
+            latest.status,
+            latest.started_at,
+            latest.finished_at,
+            latest.fetched_count,
+            latest.inserted_count,
+            latest.updated_count,
+            latest.skipped_count,
+            latest.failed_count,
+            latest.error_message,
+            coalesce(errors.recent_error_count, '0') AS recent_error_count
+          FROM sources
+          LEFT JOIN LATERAL (
+            SELECT
+              status,
+              started_at,
+              finished_at,
+              fetched_count,
+              inserted_count,
+              updated_count,
+              skipped_count,
+              failed_count,
+              error_message
+            FROM source_runs
+            WHERE source_runs.source = sources.source
+            ORDER BY started_at DESC
+            LIMIT 1
+          ) latest ON true
+          LEFT JOIN LATERAL (
+            SELECT count(*)::text AS recent_error_count
+            FROM source_errors
+            WHERE source_errors.source = sources.source
+              AND source_errors.created_at >= now() - interval '7 days'
+          ) errors ON true
+          ORDER BY sources.source ASC
+        `
+      )
+    ]);
+
+    return {
+      pipeline: pipelineResult.rows.map(mapPipelineDashboardRow),
+      documents: documentResult.rows.map(mapDocumentReviewDashboardRow),
+      contracts: contractResult.rows.map(mapContractDashboardRow),
+      buyers: buyerResult.rows.map(mapBuyerDashboardRow),
+      suppliers: supplierResult.rows.map(mapSupplierDashboardRow),
+      sources: sourceResult.rows.map(mapSourceHealthRow)
+    };
+  }
+
+  public async savePipelineState(
+    opportunityId: string,
+    input: PipelineStateInput
+  ): Promise<SavedOpportunityState> {
+    const result = await this.db.query<SavedOpportunityRow>(
+      `
+        INSERT INTO saved_opportunities (
+          opportunity_id,
+          user_key,
+          stage,
+          owner,
+          notes,
+          next_action,
+          due_date,
+          decision_reason
+        )
+        VALUES ($1, 'default', $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (opportunity_id, user_key) DO UPDATE SET
+          stage = excluded.stage,
+          owner = excluded.owner,
+          notes = excluded.notes,
+          next_action = excluded.next_action,
+          due_date = excluded.due_date,
+          decision_reason = excluded.decision_reason,
+          updated_at = now()
+        RETURNING stage, owner, notes, next_action, due_date, decision_reason
+      `,
+      [
+        opportunityId,
+        input.stage,
+        input.owner ?? null,
+        input.notes ?? null,
+        input.nextAction ?? null,
+        input.dueDate ?? null,
+        input.decisionReason ?? null
+      ]
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      throw new Error("Failed to save opportunity pipeline state");
+    }
+
+    return mapSavedOpportunityRow(row);
+  }
+
+  public async upsertScored(
+    opportunity: NormalizedOpportunityWithScore,
+    rawDocumentId?: string
+  ): Promise<UpsertOpportunityResult> {
+    const result = await this.db.query<UpsertOpportunityRow>(
+      `
+        INSERT INTO opportunities (
+          source,
+          external_id,
+          deduplication_key,
+          tender_id,
+          unique_procurement_number,
+          publication_number,
+          title,
+          buyer_name,
+          buyer_registry_number,
+          buyer_country_code,
+          status,
+          main_cpv_code,
+          cpv_codes,
+          cpv_description,
+          estimated_value,
+          currency,
+          publication_date,
+          submission_deadline,
+          procedure_type,
+          is_eu_funded,
+          european_program,
+          source_url,
+          ted_url,
+          raw_document_id
+        )
+        VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+          $21, $22, $23, $24
+        )
+        ON CONFLICT (source, external_id) DO UPDATE SET
+          deduplication_key = excluded.deduplication_key,
+          tender_id = excluded.tender_id,
+          unique_procurement_number = excluded.unique_procurement_number,
+          publication_number = excluded.publication_number,
+          title = excluded.title,
+          buyer_name = excluded.buyer_name,
+          buyer_registry_number = excluded.buyer_registry_number,
+          buyer_country_code = excluded.buyer_country_code,
+          status = excluded.status,
+          main_cpv_code = excluded.main_cpv_code,
+          cpv_codes = excluded.cpv_codes,
+          cpv_description = excluded.cpv_description,
+          estimated_value = excluded.estimated_value,
+          currency = excluded.currency,
+          publication_date = excluded.publication_date,
+          submission_deadline = excluded.submission_deadline,
+          procedure_type = excluded.procedure_type,
+          is_eu_funded = excluded.is_eu_funded,
+          european_program = excluded.european_program,
+          source_url = excluded.source_url,
+          ted_url = excluded.ted_url,
+          raw_document_id = excluded.raw_document_id,
+          updated_at = now()
+        RETURNING id, (xmax = 0) AS inserted
+      `,
+      [
+        opportunity.source,
+        opportunity.externalId,
+        opportunity.deduplicationKey,
+        opportunity.tenderId ?? null,
+        opportunity.uniqueProcurementNumber ?? null,
+        opportunity.publicationNumber ?? null,
+        opportunity.title,
+        opportunity.buyerName,
+        opportunity.buyerRegistryNumber ?? null,
+        opportunity.buyerCountryCode ?? null,
+        opportunity.status,
+        opportunity.mainCpvCode ?? opportunity.cpvCodes[0] ?? null,
+        opportunity.cpvCodes,
+        opportunity.cpvDescription ?? null,
+        opportunity.estimatedValue?.amount ?? null,
+        opportunity.estimatedValue?.currency ?? null,
+        opportunity.publicationDate ?? null,
+        opportunity.submissionDeadline ?? null,
+        opportunity.procedureType ?? null,
+        opportunity.isEuFunded ?? null,
+        opportunity.europeanProgram ?? null,
+        opportunity.sourceUrl,
+        opportunity.tedUrl ?? null,
+        rawDocumentId ?? null
+      ]
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      throw new Error("Failed to upsert opportunity");
+    }
+
+    await this.db.query(
+      `
+        INSERT INTO opportunity_matches (
+          opportunity_id,
+          score,
+          reasons,
+          profile_scores
+        )
+        VALUES ($1, $2, $3::jsonb, $4::jsonb)
+        ON CONFLICT (opportunity_id) DO UPDATE SET
+          score = excluded.score,
+          reasons = excluded.reasons,
+          profile_scores = excluded.profile_scores,
+          scored_at = now()
+      `,
+      [
+        row.id,
+        opportunity.match.score,
+        JSON.stringify(opportunity.match.reasons),
+        JSON.stringify(opportunity.profileScores ?? [])
+      ]
+    );
+
+    return {
+      id: row.id,
+      inserted: row.inserted
+    };
+  }
+}
+
+function mapOpportunityRow(row: OpportunityRow): Opportunity {
+  const profileScores = mapProfileScores(row.profile_scores);
+
+  return {
+    id: row.id,
+    source: row.source,
+    deduplicationKey: row.deduplication_key,
+    title: row.title,
+    buyerName: row.buyer_name,
+    status: row.status,
+    cpvCodes: row.cpv_codes,
+    sourceUrl: row.source_url,
+    ...(row.publication_date
+      ? { publicationDate: normalizeDbDate(row.publication_date) }
+      : {}),
+    ...(row.submission_deadline
+      ? { submissionDeadline: normalizeDbDate(row.submission_deadline) }
+      : {}),
+    ...(row.estimated_value && row.currency
+      ? {
+          estimatedValue: {
+            amount: Number(row.estimated_value),
+            currency: row.currency
+          }
+        }
+      : {}),
+    ...(profileScores.length > 0 ? { profileScores } : {}),
+    ...(row.is_eu_funded !== null ? { isEuFunded: row.is_eu_funded } : {}),
+    ...(row.score !== null
+      ? {
+          match: {
+            score: row.score,
+            reasons: Array.isArray(row.reasons) ? row.reasons : []
+          }
+        }
+      : {})
+  };
+}
+
+function mapPipelineDashboardRow(row: PipelineDashboardRow): PipelineDashboardItem {
+  return {
+    opportunity: mapOpportunityRow(row),
+    savedState: mapSavedOpportunityRow(row),
+    documentIntelligence: mapDashboardDocumentIntelligence(row)
+  };
+}
+
+function mapDocumentReviewDashboardRow(
+  row: DocumentReviewDashboardRow
+): DocumentReviewItem {
+  const savedState = mapOptionalSavedOpportunityRow(row);
+
+  return {
+    opportunity: mapOpportunityRow(row),
+    documentIntelligence: mapDashboardDocumentIntelligence(row),
+    ...(savedState ? { savedState } : {})
+  };
+}
+
+function mapContractDashboardRow(row: ContractDashboardRow): ContractDashboardItem {
+  return {
+    id: row.id,
+    source: row.source,
+    title: row.title,
+    buyerName: row.buyer_name,
+    cpvCodes: row.cpv_codes ?? [],
+    ...(row.supplier_name !== null ? { supplierName: row.supplier_name } : {}),
+    ...(row.supplier_registry_number !== null
+      ? { supplierRegistryNumber: row.supplier_registry_number }
+      : {}),
+    ...(row.contract_number !== null ? { contractNumber: row.contract_number } : {}),
+    ...(row.contract_date ? { contractDate: normalizeDbDate(row.contract_date) } : {}),
+    ...mapOptionalMoney("value", row.value, row.currency),
+    ...(row.opportunity_id !== null ? { opportunityId: row.opportunity_id } : {}),
+    ...(row.opportunity_title !== null ? { opportunityTitle: row.opportunity_title } : {})
+  };
+}
+
+function mapBuyerDashboardRow(row: BuyerDashboardRow): BuyerDashboardItem {
+  return {
+    buyerName: row.buyer_name,
+    opportunityCount: Number(row.opportunity_count),
+    openOpportunityCount: Number(row.open_opportunity_count),
+    contractCount: Number(row.contract_count),
+    topSuppliers: safeStringArray(row.top_suppliers).slice(0, 8),
+    topCpvCodes: safeStringArray(row.top_cpv_codes).slice(0, 8),
+    ...mapOptionalMoney("totalAwardedValue", row.total_awarded_value, row.currency),
+    ...mapOptionalMoney("averageAwardedValue", row.average_awarded_value, row.currency),
+    ...(row.last_activity_date
+      ? { lastActivityDate: normalizeDbDate(row.last_activity_date) }
+      : {})
+  };
+}
+
+function mapSupplierDashboardRow(row: SupplierDashboardRow): SupplierDashboardItem {
+  return {
+    supplierName: row.supplier_name,
+    winsCount: Number(row.wins_count),
+    buyerCount: Number(row.buyer_count),
+    topBuyers: safeStringArray(row.top_buyers).slice(0, 8),
+    topCpvCodes: safeStringArray(row.top_cpv_codes).slice(0, 8),
+    ...mapOptionalMoney("totalValue", row.total_value, row.currency),
+    ...mapOptionalMoney("averageValue", row.average_value, row.currency),
+    ...(row.last_win_date ? { lastWinDate: normalizeDbDate(row.last_win_date) } : {})
+  };
+}
+
+function mapSourceHealthRow(row: SourceHealthRow): SourceHealthItem {
+  return {
+    source: row.source,
+    fetchedCount: row.fetched_count ?? 0,
+    insertedCount: row.inserted_count ?? 0,
+    updatedCount: row.updated_count ?? 0,
+    skippedCount: row.skipped_count ?? 0,
+    failedCount: row.failed_count ?? 0,
+    recentErrorCount: Number(row.recent_error_count ?? 0),
+    ...(row.status ? { status: row.status } : {}),
+    ...(row.started_at ? { startedAt: normalizeDbDate(row.started_at) } : {}),
+    ...(row.finished_at ? { finishedAt: normalizeDbDate(row.finished_at) } : {}),
+    ...(row.error_message !== null ? { errorMessage: row.error_message } : {})
+  };
+}
+
+function mapDashboardDocumentIntelligence(
+  row: DashboardDocumentColumns
+): DocumentIntelligence {
+  if (!row.document_status) {
+    return emptyDocumentIntelligence();
+  }
+
+  return {
+    status: row.document_status,
+    eligibilityCriteria: safeStringArray(row.document_eligibility_criteria),
+    requiredDocuments: safeStringArray(row.document_required_documents),
+    certifications: safeStringArray(row.document_certifications),
+    risks: safeStringArray(row.document_risks),
+    ...(row.document_summary !== null ? { summary: row.document_summary } : {}),
+    ...(row.document_extracted_at
+      ? { extractedAt: normalizeDbDate(row.document_extracted_at) }
+      : {})
+  };
+}
+
+function mapOptionalSavedOpportunityRow(
+  row: DocumentReviewDashboardRow
+): SavedOpportunityState | undefined {
+  if (!row.saved_stage) {
+    return undefined;
+  }
+
+  return {
+    stage: row.saved_stage,
+    ...(row.saved_owner !== null ? { owner: row.saved_owner } : {}),
+    ...(row.saved_notes !== null ? { notes: row.saved_notes } : {}),
+    ...(row.saved_next_action !== null ? { nextAction: row.saved_next_action } : {}),
+    ...(row.saved_due_date
+      ? { dueDate: normalizeDbDate(row.saved_due_date).slice(0, 10) }
+      : {}),
+    ...(row.saved_decision_reason !== null
+      ? { decisionReason: row.saved_decision_reason }
+      : {})
+  };
+}
+
+function mapOpportunityLotRow(row: OpportunityLotRow): OpportunityLot {
+  return {
+    id: row.id,
+    cpvCodes: row.cpv_codes,
+    ...(row.lot_identifier !== null ? { lotIdentifier: row.lot_identifier } : {}),
+    ...(row.title !== null ? { title: row.title } : {}),
+    ...mapOptionalMoney("estimatedValue", row.estimated_value, row.currency),
+    ...(row.submission_deadline
+      ? { submissionDeadline: normalizeDbDate(row.submission_deadline) }
+      : {})
+  };
+}
+
+function mapContractSummaryRow(row: ContractSummaryRow): ContractSummary {
+  return {
+    id: row.id,
+    title: row.title,
+    ...(row.supplier_name !== null ? { supplierName: row.supplier_name } : {}),
+    ...(row.supplier_registry_number !== null
+      ? { supplierRegistryNumber: row.supplier_registry_number }
+      : {}),
+    ...(row.contract_number !== null ? { contractNumber: row.contract_number } : {}),
+    ...(row.contract_date ? { contractDate: normalizeDbDate(row.contract_date) } : {}),
+    ...mapOptionalMoney("value", row.value, row.currency)
+  };
+}
+
+function mapContractAmendmentRow(row: ContractAmendmentRow): ContractAmendmentSummary {
+  return {
+    id: row.id,
+    ...mapOptionalMoney("previousValue", row.previous_value, row.currency),
+    ...mapOptionalMoney("currentValue", row.current_value, row.currency),
+    ...(row.change_reason !== null ? { changeReason: row.change_reason } : {}),
+    ...(row.change_description !== null
+      ? { changeDescription: row.change_description }
+      : {})
+  };
+}
+
+function mapSavedOpportunityRow(row: SavedOpportunityRow): SavedOpportunityState {
+  return {
+    stage: row.stage,
+    ...(row.owner !== null ? { owner: row.owner } : {}),
+    ...(row.notes !== null ? { notes: row.notes } : {}),
+    ...(row.next_action !== null ? { nextAction: row.next_action } : {}),
+    ...(row.due_date ? { dueDate: normalizeDbDate(row.due_date).slice(0, 10) } : {}),
+    ...(row.decision_reason !== null ? { decisionReason: row.decision_reason } : {})
+  };
+}
+
+function mapDocumentIntelligenceRow(row: DocumentIntelligenceRow): DocumentIntelligence {
+  return {
+    status: row.status,
+    eligibilityCriteria: safeStringArray(row.eligibility_criteria),
+    requiredDocuments: safeStringArray(row.required_documents),
+    certifications: safeStringArray(row.certifications),
+    risks: safeStringArray(row.risks),
+    ...(row.summary !== null ? { summary: row.summary } : {}),
+    ...(row.extracted_at ? { extractedAt: normalizeDbDate(row.extracted_at) } : {})
+  };
+}
+
+function emptyDocumentIntelligence(): DocumentIntelligence {
+  return {
+    status: "not-available",
+    eligibilityCriteria: [],
+    requiredDocuments: [],
+    certifications: [],
+    risks: []
+  };
+}
+
+function mapCompetitorInsightRow(
+  row: CompetitorInsightRow
+): OpportunityDetail["competitorInsights"][number] {
+  return {
+    supplierName: row.supplier_name,
+    winsCount: Number(row.wins_count),
+    ...mapOptionalMoney("totalValue", row.total_value, row.currency),
+    ...(row.last_win_date ? { lastWinDate: normalizeDbDate(row.last_win_date) } : {})
+  };
+}
+
+function mapProfileScores(value: ProfileFitScore[] | null): ProfileFitScore[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function mapOptionalMoney<K extends string>(
+  key: K,
+  amount: string | null,
+  currency: string | null
+): { [P in K]: Money } | Record<string, never> {
+  if (!amount || !currency) {
+    return {};
+  }
+
+  return {
+    [key]: {
+      amount: Number(amount),
+      currency
+    }
+  } as { [P in K]: Money };
+}
+
+function safeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function normalizeDbDate(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function clampLimit(limit: number | undefined): number {
+  if (limit === undefined || !Number.isFinite(limit)) {
+    return 100;
+  }
+
+  return Math.min(Math.max(Math.trunc(limit), 1), 500);
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@public-scanner/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "migrate": "tsx src/migrate.ts",
+    "migrations:list": "node -e \"const fs=require('node:fs'); console.log(fs.readdirSync('migrations').sort().join('\\n'))\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@public-scanner/domain": "0.1.0",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0"
+  }
+}

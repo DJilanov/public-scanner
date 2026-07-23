@@ -1,0 +1,18 @@
+{
+  "name": "@public-scanner/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "npm run build --workspace @public-scanner/domain && tsx src/server.ts",
+    "admin:upsert": "tsx src/upsert-admin.ts"
+  },
+  "dependencies": {
+    "@public-scanner/db": "0.1.0",
+    "@public-scanner/domain": "0.1.0",
+    "fastify": "^5.10.0"
+  }
+}

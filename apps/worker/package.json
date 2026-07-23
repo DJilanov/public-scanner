@@ -1,0 +1,17 @@
+{
+  "name": "@public-scanner/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "npm run build --workspace @public-scanner/domain && npm run build --workspace @public-scanner/connectors && tsx src/index.ts"
+  },
+  "dependencies": {
+    "@public-scanner/connectors": "0.1.0",
+    "@public-scanner/db": "0.1.0",
+    "@public-scanner/domain": "0.1.0"
+  }
+}
