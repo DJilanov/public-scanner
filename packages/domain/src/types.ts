@@ -149,6 +149,7 @@ export interface Opportunity {
   isEuFunded?: boolean;
   match?: OpportunityScore;
   profileScores?: ProfileFitScore[];
+  aiAnalysis?: TenderAiAnalysis;
 }
 
 export interface NormalizedOpportunity {

@@ -952,7 +952,7 @@ textarea:focus-visible {
 
 table {
   width: 100%;
-  min-width: 900px;
+  min-width: 1060px;
   border-collapse: collapse;
 }
 
@@ -1263,6 +1263,31 @@ button.text-button:hover:not(:disabled),
   font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.ai-table-scores {
+  display: grid;
+  gap: 5px;
+  min-width: 138px;
+}
+
+.ai-table-scores span {
+  display: grid;
+  grid-template-columns: minmax(82px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.ai-table-scores b {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 750;
+}
+
+.ai-table-empty {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.82rem;
 }
 
 .source-summary-metrics {

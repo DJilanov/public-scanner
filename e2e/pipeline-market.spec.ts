@@ -259,8 +259,16 @@ test("sources explain western europe coverage", async ({ page }) => {
 test("opportunity workbench supports AI score filters", async ({ page }) => {
   await page.goto("/#opportunities");
 
-  await expect(page.getByText("Bulgarian e-services platform")).toBeVisible();
-  await expect(page.getByText("Romania data center refresh")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Bulgarian e-services platform" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Romania data center refresh" })
+  ).toBeVisible();
+  await expect(page.locator(".ai-table-scores").first().getByText("88")).toBeVisible();
+  await expect(
+    page.locator(".ai-table-scores").first().getByText("AI fit")
+  ).toBeVisible();
 
   const filteredRequest = page.waitForRequest((request) => {
     if (!request.url().includes("/api/opportunities?")) {
@@ -270,11 +278,13 @@ test("opportunity workbench supports AI score filters", async ({ page }) => {
     return new URL(request.url()).searchParams.get("minAiBusinessFit") === "90";
   });
 
-  await page.getByLabel("AI fit").fill("90");
+  await page.getByRole("textbox", { name: "AI fit" }).fill("90");
   await filteredRequest;
 
   await expect(page.getByText("No matching opportunities")).toBeVisible();
-  await expect(page.getByText("Bulgarian e-services platform")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Bulgarian e-services platform" })
+  ).toHaveCount(0);
 
   const aiReadyRequest = page.waitForRequest((request) => {
     if (!request.url().includes("/api/opportunities?")) {
@@ -394,7 +404,10 @@ async function mockApi(page: Page): Promise<void> {
               documentIntelligence.aiAnalysis.commercialScore >= minAiCommercial &&
               documentIntelligence.aiAnalysis.dataConfidenceScore >= minAiConfidence
           )
-          .map((item) => item.opportunity)
+          .map((item) => ({
+            ...item.opportunity,
+            aiAnalysis: documentIntelligence.aiAnalysis
+          }))
       }
     });
   });

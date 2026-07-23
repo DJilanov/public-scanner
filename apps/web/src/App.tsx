@@ -76,6 +76,7 @@ type ThemePreference = "light" | "dark";
 type Locale = "en" | "bg";
 type SectorFilter = "" | BusinessProfileKind;
 type FundingFilter = "" | "eu-funded";
+type OpportunitySort = "fit" | "deadline" | "ai-fit" | "ai-readiness" | "ai-confidence";
 type AppView =
   | "overview"
   | "opportunities"
@@ -151,6 +152,7 @@ interface Filters {
   minAiReadiness: string;
   minAiCommercial: string;
   minAiConfidence: string;
+  sort: OpportunitySort;
   deadlineTo: string;
 }
 
@@ -272,6 +274,7 @@ const DEFAULT_FILTERS: Filters = {
   minAiReadiness: "",
   minAiCommercial: "",
   minAiConfidence: "",
+  sort: "fit",
   deadlineTo: ""
 };
 
@@ -486,6 +489,14 @@ const TRANSLATIONS = {
     minAiReadiness: "AI readiness",
     minAiCommercial: "AI commercial",
     minAiConfidence: "AI confidence",
+    aiScores: "AI scores",
+    noAiScore: "No AI score",
+    sortBy: "Sort by",
+    sortByFit: "Best fit",
+    sortByDeadline: "Deadline",
+    sortByAiFit: "AI fit",
+    sortByAiReadiness: "AI readiness",
+    sortByAiConfidence: "AI confidence",
     business: "Business",
     search: "Search",
     buyer: "Buyer",
@@ -885,6 +896,14 @@ const TRANSLATIONS = {
     minAiReadiness: "AI готовност",
     minAiCommercial: "AI търговски",
     minAiConfidence: "AI увереност",
+    aiScores: "AI резултати",
+    noAiScore: "Няма AI оценка",
+    sortBy: "Подреди по",
+    sortByFit: "Най-добро съвпадение",
+    sortByDeadline: "Срок",
+    sortByAiFit: "AI съвпадение",
+    sortByAiReadiness: "AI готовност",
+    sortByAiConfidence: "AI увереност",
     business: "Бизнес",
     search: "Търсене",
     buyer: "Възложител",
@@ -1791,6 +1810,26 @@ export function App() {
     () => getOpportunityFilterProfileIds(filters.sector, profiles, selectedProfileIds),
     [filters.sector, profiles, selectedProfileIds]
   );
+  const opportunityQueryFilters = useMemo<Filters>(
+    () => ({
+      ...filters,
+      funding: "",
+      sort: "fit" as const
+    }),
+    [
+      filters.buyer,
+      filters.cpvPrefix,
+      filters.deadlineTo,
+      filters.minAiBusinessFit,
+      filters.minAiCommercial,
+      filters.minAiConfidence,
+      filters.minAiReadiness,
+      filters.minScore,
+      filters.search,
+      filters.sector,
+      filters.source
+    ]
+  );
   const marketFilters = useMemo(
     () => ({
       selectedCountryCodes,
@@ -1835,7 +1874,7 @@ export function App() {
 
       try {
         const requestUrl = buildOpportunityUrl(
-          filters,
+          opportunityQueryFilters,
           opportunityProfileIds,
           marketFilters
         );
@@ -1873,7 +1912,13 @@ export function App() {
         );
       }
     },
-    [filters, handleUnauthenticated, locale, marketFilters, opportunityProfileIds]
+    [
+      handleUnauthenticated,
+      locale,
+      marketFilters,
+      opportunityProfileIds,
+      opportunityQueryFilters
+    ]
   );
 
   const loadDashboard = useCallback(
@@ -2097,21 +2142,16 @@ export function App() {
     };
   }, [authState, loadAlertRules]);
 
-  const rankedOpportunities = useMemo(
+  const filteredOpportunities = useMemo(
     () =>
-      [...opportunities].sort(
-        (first, second) =>
-          getOpportunityScore(second, opportunityProfileIds) -
-          getOpportunityScore(first, opportunityProfileIds)
-      ),
-    [opportunities, opportunityProfileIds]
-  );
-  const sortedOpportunities = useMemo(
-    () =>
-      rankedOpportunities.filter((opportunity) =>
+      opportunities.filter((opportunity) =>
         filters.funding === "eu-funded" ? opportunity.isEuFunded : true
       ),
-    [filters.funding, rankedOpportunities]
+    [filters.funding, opportunities]
+  );
+  const sortedOpportunities = useMemo(
+    () => sortOpportunities(filteredOpportunities, filters.sort, opportunityProfileIds),
+    [filteredOpportunities, filters.sort, opportunityProfileIds]
   );
   const scopedPipelineItems = useMemo(
     () =>
@@ -3061,6 +3101,24 @@ export function App() {
                   }))
                 }
               />
+            </label>
+            <label>
+              <span>{t(locale, "sortBy")}</span>
+              <select
+                value={filters.sort}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    sort: normalizeOpportunitySort(event.target.value)
+                  }))
+                }
+              >
+                <option value="fit">{t(locale, "sortByFit")}</option>
+                <option value="deadline">{t(locale, "sortByDeadline")}</option>
+                <option value="ai-fit">{t(locale, "sortByAiFit")}</option>
+                <option value="ai-readiness">{t(locale, "sortByAiReadiness")}</option>
+                <option value="ai-confidence">{t(locale, "sortByAiConfidence")}</option>
+              </select>
             </label>
             <label>
               <span>{t(locale, "deadline")}</span>
@@ -5238,6 +5296,7 @@ function OpportunityTable({
         <thead>
           <tr>
             <th scope="col">{t(locale, "score")}</th>
+            <th scope="col">{t(locale, "aiScores")}</th>
             <th scope="col">{t(locale, "opportunity")}</th>
             <th scope="col">{t(locale, "buyer")}</th>
             <th scope="col">{t(locale, "cpv")}</th>
@@ -5279,6 +5338,12 @@ function OpportunityTable({
                       )}
                     </span>
                   ) : null}
+                </td>
+                <td>
+                  <OpportunityAiScoreChips
+                    analysis={opportunity.aiAnalysis}
+                    locale={locale}
+                  />
                 </td>
                 <td>
                   <button
@@ -5323,6 +5388,51 @@ function OpportunityTable({
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+interface OpportunityAiScoreChipsProps {
+  analysis: Opportunity["aiAnalysis"] | undefined;
+  locale: Locale;
+}
+
+function OpportunityAiScoreChips({ analysis, locale }: OpportunityAiScoreChipsProps) {
+  if (!analysis) {
+    return <span className="ai-table-empty">{t(locale, "noAiScore")}</span>;
+  }
+
+  const scores = [
+    {
+      label: t(locale, "businessFit"),
+      shortLabel: t(locale, "minAiBusinessFit"),
+      value: analysis.businessFitScore
+    },
+    {
+      label: t(locale, "readiness"),
+      shortLabel: t(locale, "minAiReadiness"),
+      value: analysis.readinessScore
+    },
+    {
+      label: t(locale, "commercial"),
+      shortLabel: t(locale, "minAiCommercial"),
+      value: analysis.commercialScore
+    },
+    {
+      label: t(locale, "dataConfidence"),
+      shortLabel: t(locale, "minAiConfidence"),
+      value: analysis.dataConfidenceScore
+    }
+  ];
+
+  return (
+    <div className="ai-table-scores" aria-label={t(locale, "aiScores")}>
+      {scores.map((score) => (
+        <span key={score.label} title={score.label}>
+          <b>{score.shortLabel}</b>
+          <strong className={getCompactScoreClassName(score.value)}>{score.value}</strong>
+        </span>
+      ))}
     </div>
   );
 }
@@ -7426,6 +7536,15 @@ function normalizePipelineScopeCountryCode(
     : "";
 }
 
+function normalizeOpportunitySort(value: unknown): OpportunitySort {
+  return value === "deadline" ||
+    value === "ai-fit" ||
+    value === "ai-readiness" ||
+    value === "ai-confidence"
+    ? value
+    : "fit";
+}
+
 function isSupportedCountryCode(value: string): value is SupportedCountryCode {
   return SUPPORTED_COUNTRIES.some((country) => country.code === value);
 }
@@ -7443,6 +7562,7 @@ function normalizeFilters(value: Partial<Filters> | undefined): Filters {
     minAiReadiness: normalizeScoreInput(value?.minAiReadiness),
     minAiCommercial: normalizeScoreInput(value?.minAiCommercial),
     minAiConfidence: normalizeScoreInput(value?.minAiConfidence),
+    sort: normalizeOpportunitySort(value?.sort),
     deadlineTo: normalizeTextFilter(value?.deadlineTo)
   };
 }
@@ -7496,7 +7616,8 @@ function getBuiltInOpportunityViews(
         minScore: "62",
         minAiBusinessFit: "75",
         minAiReadiness: "70",
-        minAiConfidence: "70"
+        minAiConfidence: "70",
+        sort: "ai-fit"
       }
     },
     {
@@ -7531,6 +7652,7 @@ function formatActiveFilterSummary(filters: Filters, locale: Locale): string {
     filters.minAiConfidence
       ? `${t(locale, "minAiConfidence")} ${filters.minAiConfidence}+`
       : undefined,
+    filters.sort !== "fit" ? formatOpportunitySort(filters.sort, locale) : undefined,
     filters.deadlineTo
       ? `${t(locale, "deadline")} ${formatDate(filters.deadlineTo, locale)}`
       : undefined,
@@ -7545,6 +7667,90 @@ function getEffectiveMinScore(filters: Filters): string {
   return filters.minScore || (filters.sector ? DEFAULT_SECTOR_MIN_SCORE : "");
 }
 
+function sortOpportunities(
+  opportunities: Opportunity[],
+  sort: OpportunitySort,
+  profileIds: BusinessProfileId[]
+): Opportunity[] {
+  return [...opportunities].sort((first, second) => {
+    const scoreDelta = compareOpportunitySortValue(first, second, sort, profileIds);
+    if (scoreDelta !== 0) {
+      return scoreDelta;
+    }
+
+    return (
+      getOpportunityScore(second, profileIds) - getOpportunityScore(first, profileIds) ||
+      compareOpportunityDeadlines(first, second) ||
+      first.title.localeCompare(second.title)
+    );
+  });
+}
+
+function compareOpportunitySortValue(
+  first: Opportunity,
+  second: Opportunity,
+  sort: OpportunitySort,
+  profileIds: BusinessProfileId[]
+): number {
+  switch (sort) {
+    case "deadline":
+      return compareOpportunityDeadlines(first, second);
+    case "ai-fit":
+      return (
+        getAiScore(second, "businessFitScore") - getAiScore(first, "businessFitScore")
+      );
+    case "ai-readiness":
+      return getAiScore(second, "readinessScore") - getAiScore(first, "readinessScore");
+    case "ai-confidence":
+      return (
+        getAiScore(second, "dataConfidenceScore") -
+        getAiScore(first, "dataConfidenceScore")
+      );
+    case "fit":
+      return (
+        getOpportunityScore(second, profileIds) - getOpportunityScore(first, profileIds)
+      );
+  }
+}
+
+function compareOpportunityDeadlines(first: Opportunity, second: Opportunity): number {
+  const firstTime = getDateTime(first.submissionDeadline);
+  const secondTime = getDateTime(second.submissionDeadline);
+
+  if (firstTime === undefined && secondTime === undefined) {
+    return 0;
+  }
+
+  if (firstTime === undefined) {
+    return 1;
+  }
+
+  if (secondTime === undefined) {
+    return -1;
+  }
+
+  return firstTime - secondTime;
+}
+
+function getAiScore(
+  opportunity: Opportunity,
+  key: keyof Pick<
+    NonNullable<Opportunity["aiAnalysis"]>,
+    "businessFitScore" | "readinessScore" | "commercialScore" | "dataConfidenceScore"
+  >
+): number {
+  return opportunity.aiAnalysis?.[key] ?? -1;
+}
+
+function getDateTime(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? undefined : time;
+}
+
 function getOpportunityScore(
   opportunity: Opportunity,
   profileIds: BusinessProfileId[]
@@ -7554,6 +7760,21 @@ function getOpportunityScore(
     opportunity.match?.score ??
     0
   );
+}
+
+function formatOpportunitySort(sort: OpportunitySort, locale: Locale): string {
+  switch (sort) {
+    case "deadline":
+      return t(locale, "sortByDeadline");
+    case "ai-fit":
+      return t(locale, "sortByAiFit");
+    case "ai-readiness":
+      return t(locale, "sortByAiReadiness");
+    case "ai-confidence":
+      return t(locale, "sortByAiConfidence");
+    case "fit":
+      return t(locale, "sortByFit");
+  }
 }
 
 function getBestProfileScore(

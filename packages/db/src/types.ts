@@ -230,6 +230,7 @@ export interface OpportunityRow extends QueryResultRow {
   score: number | null;
   reasons: MatchReason[] | null;
   profile_scores: ProfileFitScore[] | null;
+  ai_analysis?: TenderAiAnalysis | null;
 }
 
 export interface PipelineStateInput {

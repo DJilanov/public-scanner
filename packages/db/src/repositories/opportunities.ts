@@ -218,6 +218,7 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
             m.score,
             m.reasons,
             m.profile_scores,
+            di.ai_analysis,
             ${selectedProfileScoreSql} AS selected_profile_score,
             row_number() OVER (
               PARTITION BY o.deduplication_key
@@ -232,6 +233,7 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
             ) AS dedupe_rank
           FROM opportunities o
           LEFT JOIN opportunity_matches m ON m.opportunity_id = o.id
+          LEFT JOIN document_intelligence di ON di.opportunity_id = o.id
           ${where}
         )
         SELECT *
@@ -256,9 +258,11 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
           o.*,
           m.score,
           m.reasons,
-          m.profile_scores
+          m.profile_scores,
+          di.ai_analysis
         FROM opportunities o
         LEFT JOIN opportunity_matches m ON m.opportunity_id = o.id
+        LEFT JOIN document_intelligence di ON di.opportunity_id = o.id
         WHERE o.id = $1
       `,
       [id]
@@ -1045,6 +1049,7 @@ function mapOpportunityRow(row: OpportunityRow): Opportunity {
       : {}),
     ...(profileScores.length > 0 ? { profileScores } : {}),
     ...(row.is_eu_funded !== null ? { isEuFunded: row.is_eu_funded } : {}),
+    ...mapOptionalAiAnalysis(row.ai_analysis),
     ...(row.score !== null
       ? {
           match: {
