@@ -14,11 +14,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   ingestCais,
+  ingestSedia,
   ingestTed,
   runBackfill,
   runOnce,
   type CaisDailyClient,
   type IngestionStore,
+  type SediaOpportunityClient,
   type TedNoticeClient
 } from "./index.js";
 
@@ -92,7 +94,8 @@ describe("worker ingestion", () => {
       now: new Date("2026-07-23T10:00:00.000Z"),
       caisClient,
       store,
-      includeTed: false
+      includeTed: false,
+      includeSedia: false
     });
 
     expect(result.cais).toMatchObject({
@@ -286,6 +289,54 @@ describe("worker ingestion", () => {
     });
   });
 
+  it("ingests and deduplicates SEDIA tender search results", async () => {
+    const store = new MemoryIngestionStore();
+    const sediaClient: SediaOpportunityClient = {
+      async searchAll() {
+        return {
+          totalResults: 1,
+          results: [
+            {
+              reference: "sedia-ref",
+              url: "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/tender-details/sedia-ref",
+              metadata: {
+                identifier: ["sedia-ref"],
+                title: ["Cloud software platform"],
+                deadlineDate: ["2026-08-10T17:00:59.000+0000"],
+                startDate: ["2026-07-22T00:00:00.000+0000"],
+                language: ["en"],
+                type: ["0"]
+              }
+            }
+          ]
+        };
+      }
+    };
+
+    const result = await ingestSedia({
+      sourceDate: "2026-07-22",
+      now: new Date("2026-07-23T00:00:00.000Z"),
+      store,
+      client: sediaClient,
+      searchTerms: ["cloud", "software"]
+    });
+
+    expect(result).toMatchObject({
+      source: "sedia",
+      fetchedCount: 1,
+      insertedCount: 1,
+      failedCount: 0
+    });
+    expect(store.opportunities[0]).toMatchObject({
+      source: "sedia",
+      sourceId: "eu-sedia",
+      externalId: "sedia-ref",
+      title: "Cloud software platform",
+      buyerName: "EU Funding & Tenders",
+      status: "open"
+    });
+  });
+
   it("builds TED queries for configured regional and western markets", async () => {
     const store = new MemoryIngestionStore();
     let capturedQuery = "";
@@ -305,6 +356,7 @@ describe("worker ingestion", () => {
       now: new Date("2026-07-23T00:00:00.000Z"),
       store,
       includeCais: false,
+      includeSedia: false,
       tedClient,
       tedCountryCodes: ["RO", "DE", "FR"]
     });
@@ -321,6 +373,7 @@ describe("worker ingestion", () => {
       now: new Date("2026-07-23T00:00:00.000Z"),
       store,
       includeTed: false,
+      includeSedia: false,
       caisClient: buildCaisClient([])
     });
 

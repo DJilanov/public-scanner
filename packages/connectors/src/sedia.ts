@@ -25,6 +25,28 @@ export interface SediaSearchResponse {
 
 export const SEDIA_OPEN_STATUSES = ["31094501", "31094502"] as const;
 export const SEDIA_TENDER_TYPES = ["0"] as const;
+export const SEDIA_DISPLAY_FIELDS = [
+  "type",
+  "identifier",
+  "reference",
+  "title",
+  "status",
+  "startDate",
+  "deadlineDate",
+  "caName",
+  "url",
+  "language"
+] as const;
+export const DEFAULT_SEDIA_ICT_SEARCH_TERMS = [
+  "software",
+  "hardware",
+  "cybersecurity",
+  "cloud",
+  "network",
+  "data",
+  "digital",
+  "IT services"
+] as const;
 
 const SediaSearchResponseSchema = z
   .object({
@@ -46,9 +68,10 @@ export class SediaClient {
 
   public async search(request: SediaSearchRequest): Promise<SediaSearchResponse> {
     const url = new URL(this.baseUrl);
+    const pageSize = request.pageSize ?? 25;
     url.searchParams.set("apiKey", "SEDIA");
     url.searchParams.set("text", request.text);
-    url.searchParams.set("pageSize", String(request.pageSize ?? 25));
+    url.searchParams.set("pageSize", String(pageSize));
     url.searchParams.set("pageNumber", String(request.pageNumber ?? 1));
 
     const form = new FormData();
@@ -62,20 +85,7 @@ export class SediaClient {
     });
     appendJson(form, "languages", ["en"]);
     appendJson(form, "sort", { order: "DESC", field: "startDate" });
-    appendJson(
-      form,
-      "displayFields",
-      request.displayFields ?? [
-        "type",
-        "identifier",
-        "reference",
-        "title",
-        "status",
-        "startDate",
-        "deadlineDate",
-        "caName"
-      ]
-    );
+    appendJson(form, "displayFields", request.displayFields ?? SEDIA_DISPLAY_FIELDS);
 
     const response = await this.fetcher.fetch(url, {
       method: "POST",
@@ -95,6 +105,41 @@ export class SediaClient {
     return {
       results: parsed.results,
       ...(parsed.totalResults !== undefined ? { totalResults: parsed.totalResults } : {})
+    };
+  }
+
+  public async searchAll(
+    request: SediaSearchRequest,
+    options: { maxPages?: number } = {}
+  ): Promise<SediaSearchResponse> {
+    const maxPages = options.maxPages ?? 5;
+    const pageSize = request.pageSize ?? 50;
+    const firstPageNumber = request.pageNumber ?? 1;
+    const results: SediaResult[] = [];
+    let totalResults: number | undefined;
+
+    for (let pageOffset = 0; pageOffset < maxPages; pageOffset += 1) {
+      const response = await this.search({
+        ...request,
+        pageSize,
+        pageNumber: firstPageNumber + pageOffset
+      });
+
+      results.push(...response.results);
+      totalResults = response.totalResults ?? totalResults;
+
+      if (
+        response.results.length === 0 ||
+        response.results.length < pageSize ||
+        (totalResults !== undefined && results.length >= totalResults)
+      ) {
+        break;
+      }
+    }
+
+    return {
+      results,
+      ...(totalResults !== undefined ? { totalResults } : {})
     };
   }
 }

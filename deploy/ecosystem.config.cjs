@@ -37,7 +37,13 @@ module.exports = {
         TED_COUNTRY_CODES:
           process.env.TED_COUNTRY_CODES ||
           "BG,RO,GR,HR,SI,ME,AT,BE,DE,DK,ES,FI,FR,IE,IT,LU,NL,PT,SE",
-        TED_MAX_PAGES: process.env.TED_MAX_PAGES || "20"
+        TED_MAX_PAGES: process.env.TED_MAX_PAGES || "20",
+        INCLUDE_SEDIA: process.env.INCLUDE_SEDIA || "true",
+        SEDIA_SEARCH_TERMS:
+          process.env.SEDIA_SEARCH_TERMS ||
+          "software,hardware,cybersecurity,cloud,network,data,digital,IT services",
+        SEDIA_PAGE_SIZE: process.env.SEDIA_PAGE_SIZE || "50",
+        SEDIA_MAX_PAGES: process.env.SEDIA_MAX_PAGES || "3"
       }
     }
   ]

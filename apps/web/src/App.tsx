@@ -7873,7 +7873,11 @@ function formatSourceLabel(source: SourceHealthItem): string {
 }
 
 function formatSourceConnectorCoverage(source: SourceHealthItem, locale: Locale): string {
-  if (source.source === "bg-cais-eop" || source.source === "eu-ted") {
+  if (
+    source.source === "bg-cais-eop" ||
+    source.source === "eu-ted" ||
+    source.source === "eu-sedia"
+  ) {
     return t(locale, "sourceActiveFetcher");
   }
 

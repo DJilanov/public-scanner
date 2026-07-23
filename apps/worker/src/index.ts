@@ -2,9 +2,13 @@ import {
   buildTedIctQuery,
   CaisOpenDataClient,
   DEFAULT_TED_MARKET_COUNTRY_CODES,
+  DEFAULT_SEDIA_ICT_SEARCH_TERMS,
+  SEDIA_DISPLAY_FIELDS,
+  SediaClient,
   TED_SOFTWARE_FIELDS,
   TedClient,
   type CaisOpenDataFile,
+  type SediaSearchResponse,
   type TedSearchResponse
 } from "@public-scanner/connectors";
 import {
@@ -13,6 +17,7 @@ import {
   normalizeCaisAnnexRecord,
   normalizeCaisContractRecord,
   normalizeOcdsLots,
+  normalizeSediaResultRecord,
   normalizeCountryCodes,
   normalizeTedNoticeRecord,
   scoreNormalizedOpportunity,
@@ -66,6 +71,20 @@ export interface TedNoticeClient {
   ): Promise<TedSearchResponse>;
 }
 
+export interface SediaOpportunityClient {
+  searchAll(
+    request: {
+      text: string;
+      pageSize?: number;
+      pageNumber?: number;
+      types?: readonly string[];
+      statuses?: readonly string[];
+      displayFields?: readonly string[];
+    },
+    options?: { maxPages?: number }
+  ): Promise<SediaSearchResponse>;
+}
+
 export interface IngestionStore {
   createSourceRun(input: SourceRunInput): Promise<string>;
   finishSourceRun(sourceRunId: string, input: SourceRunCompletionInput): Promise<void>;
@@ -96,19 +115,26 @@ export interface WorkerRunOptions {
   now?: Date;
   caisClient?: CaisDailyClient;
   tedClient?: TedNoticeClient;
+  sediaClient?: SediaOpportunityClient;
   store?: IngestionStore;
   includeCais?: boolean;
   includeTed?: boolean;
+  includeSedia?: boolean;
   tedCountryCodes?: SupportedCountryCode[];
   tedMaxPages?: number;
+  sediaSearchTerms?: string[];
+  sediaPageSize?: number;
+  sediaMaxPages?: number;
   runMigrations?: boolean;
 }
 
 export interface WorkerRunResult {
   cais?: SourceRunSummary;
   ted?: SourceRunSummary;
+  sedia?: SourceRunSummary;
   tedCountryCodes?: SupportedCountryCode[];
   tedQuery?: string;
+  sediaSearchTerms?: string[];
 }
 
 export interface WorkerBackfillOptions extends Omit<WorkerRunOptions, "sourceDate"> {
@@ -169,6 +195,24 @@ export async function runOnce(options: WorkerRunOptions = {}): Promise<WorkerRun
         query: tedQuery,
         client: options.tedClient ?? new TedClient(),
         ...(options.tedMaxPages !== undefined ? { maxPages: options.tedMaxPages } : {})
+      });
+    }
+
+    if (options.includeSedia ?? true) {
+      const sediaSearchTerms = normalizeSediaSearchTerms(options.sediaSearchTerms);
+      result.sediaSearchTerms = sediaSearchTerms;
+      result.sedia = await ingestSedia({
+        sourceDate,
+        now,
+        store,
+        searchTerms: sediaSearchTerms,
+        client: options.sediaClient ?? new SediaClient(),
+        ...(options.sediaPageSize !== undefined
+          ? { pageSize: options.sediaPageSize }
+          : {}),
+        ...(options.sediaMaxPages !== undefined
+          ? { maxPages: options.sediaMaxPages }
+          : {})
       });
     }
 
@@ -368,6 +412,102 @@ export async function ingestTed(
       payload: {
         query: options.query
       }
+    });
+  }
+
+  await finishRun(options.store, sourceRunId, counts, errorMessage);
+  return toSummary(source, options.sourceDate, counts);
+}
+
+export async function ingestSedia(
+  options: IngestSourceOptions & {
+    client: SediaOpportunityClient;
+    searchTerms: readonly string[];
+    pageSize?: number;
+    maxPages?: number;
+  }
+): Promise<SourceRunSummary> {
+  const source: ProcurementSource = "sedia";
+  const sourceRunId = await options.store.createSourceRun({
+    source,
+    sourceDate: options.sourceDate
+  });
+  const counts = emptyCounts();
+  const pageSize = options.pageSize ?? 50;
+  const searchTerms = normalizeSediaSearchTerms(options.searchTerms);
+  const searchResponses: Array<{
+    text: string;
+    response: SediaSearchResponse;
+  }> = [];
+  const resultsByExternalId = new Map<string, unknown>();
+  let errorMessage: string | undefined;
+
+  for (const text of searchTerms) {
+    try {
+      const response = await options.client.searchAll(
+        {
+          text,
+          pageSize,
+          displayFields: SEDIA_DISPLAY_FIELDS
+        },
+        options.maxPages !== undefined ? { maxPages: options.maxPages } : {}
+      );
+      searchResponses.push({ text, response });
+
+      for (const record of response.results) {
+        const normalized = normalizeSediaResultRecord(record, { now: options.now });
+        if (!normalized) {
+          counts.skippedCount += 1;
+          continue;
+        }
+
+        if (!resultsByExternalId.has(normalized.externalId)) {
+          resultsByExternalId.set(normalized.externalId, record);
+        }
+      }
+    } catch (error) {
+      counts.failedCount += 1;
+      errorMessage = getErrorMessage(error);
+      await recordSourceError(options.store, {
+        sourceRunId,
+        source,
+        sourceDate: options.sourceDate,
+        context: `sedia-search:${text}`,
+        errorMessage
+      });
+    }
+  }
+
+  const uniqueResults = [...resultsByExternalId.values()];
+  counts.fetchedCount = uniqueResults.length;
+
+  if (uniqueResults.length > 0 || searchResponses.length > 0) {
+    const rawDocumentId = await options.store.insertRawDocument({
+      sourceRunId,
+      source,
+      sourceDate: options.sourceDate,
+      sourceUrl: "https://api.tech.ec.europa.eu/search-api/prod/rest/search?apiKey=SEDIA",
+      contentType: "application/json",
+      payload: {
+        request: {
+          searchTerms,
+          pageSize,
+          ...(options.maxPages !== undefined ? { maxPages: options.maxPages } : {}),
+          displayFields: SEDIA_DISPLAY_FIELDS
+        },
+        searches: searchResponses
+      }
+    });
+
+    await persistOpportunities({
+      source,
+      payload: uniqueResults,
+      rawDocumentId,
+      counts,
+      now: options.now,
+      normalize: (record) => normalizeSediaResultRecord(record, { now: options.now }),
+      context: "sedia-result",
+      store: options.store
     });
   }
 
@@ -807,10 +947,16 @@ async function runFromEnvironment(): Promise<WorkerRunResult | WorkerRunResult[]
   const tedMaxPages = process.env.TED_MAX_PAGES
     ? parsePositiveIntegerEnv("TED_MAX_PAGES")
     : undefined;
+  const sediaPageSize = parsePositiveIntegerEnv("SEDIA_PAGE_SIZE");
+  const sediaMaxPages = parsePositiveIntegerEnv("SEDIA_MAX_PAGES");
   const commonOptions = {
     includeCais: parseBooleanEnv("INCLUDE_CAIS", true),
     includeTed: parseBooleanEnv("INCLUDE_TED", true),
+    includeSedia: parseBooleanEnv("INCLUDE_SEDIA", true),
     tedCountryCodes: getTedCountryCodesFromEnvironment(),
+    sediaSearchTerms: getSediaSearchTermsFromEnvironment(),
+    ...(sediaPageSize !== undefined ? { sediaPageSize } : {}),
+    ...(sediaMaxPages !== undefined ? { sediaMaxPages } : {}),
     ...(tedMaxPages !== undefined ? { tedMaxPages } : {})
   };
 
@@ -890,6 +1036,18 @@ function getTedCountryCodesFromEnvironment(): SupportedCountryCode[] {
   }
 
   return normalizeCountryCodes(value.split(","));
+}
+
+function getSediaSearchTermsFromEnvironment(): string[] {
+  return normalizeSediaSearchTerms(process.env.SEDIA_SEARCH_TERMS?.split(","));
+}
+
+function normalizeSediaSearchTerms(values: readonly string[] | undefined): string[] {
+  const terms = (values ?? DEFAULT_SEDIA_ICT_SEARCH_TERMS)
+    .map((term) => term.trim())
+    .filter(Boolean);
+
+  return [...new Set(terms)].slice(0, 25);
 }
 
 function enumerateDates(from: string, to: string): string[] {

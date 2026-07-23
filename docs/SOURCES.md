@@ -89,7 +89,7 @@ Recommended fields:
 
 ## EU Funding & Tenders / SEDIA
 
-Priority: P1
+Priority: P0 active
 
 Endpoint:
 
@@ -104,7 +104,8 @@ Initial filters:
 
 - type `0` for calls for tenders
 - statuses `31094501` and `31094502` for forthcoming/open opportunities
-- keyword search for software, IT, development, data, security, and cloud
+- configurable ICT keyword search through `SEDIA_SEARCH_TERMS`; production defaults to
+  software, hardware, cybersecurity, cloud, network, data, digital, and IT services
 
 ## Supporting Sources
 

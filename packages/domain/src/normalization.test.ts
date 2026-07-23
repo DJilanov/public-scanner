@@ -5,6 +5,7 @@ import {
   normalizeCaisContractRecord,
   normalizeCaisTenderRecord,
   normalizeOcdsLots,
+  normalizeSediaResultRecord,
   normalizeTedNoticeRecord,
   parseSourceNumber,
   scoreNormalizedOpportunity
@@ -164,6 +165,47 @@ describe("normalization", () => {
       status: "open",
       cpvCodes: ["72700000", "72230000"],
       tedUrl: "https://ted.europa.eu/bg/notice/510019-2026/html"
+    });
+  });
+
+  it("normalizes SEDIA tender search results", () => {
+    const opportunity = normalizeSediaResultRecord(
+      {
+        reference: "69b193d7-f301-438d-8be9-726e790a2aca-CN",
+        content:
+          "Acquisition, delivery, installation and hardware and <b>software</b> maintenance.",
+        url: "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/tender-details/69b193d7-f301-438d-8be9-726e790a2aca-CN",
+        metadata: {
+          identifier: ["69b193d7-f301-438d-8be9-726e790a2aca-CN"],
+          title: [
+            "Acquisition, delivery, installation and hardware and software maintenance"
+          ],
+          caName: [
+            "Acquisition, delivery, installation and hardware and software maintenance"
+          ],
+          startDate: ["2026-07-23T00:00:00.000+0000"],
+          deadlineDate: ["2026-09-01T17:00:59.000+0000"],
+          language: ["en"],
+          type: ["0"],
+          url: [
+            "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/tender-details/69b193d7-f301-438d-8be9-726e790a2aca-CN"
+          ]
+        }
+      },
+      { now: new Date("2026-07-23T00:00:00.000Z") }
+    );
+
+    expect(opportunity).toMatchObject({
+      source: "sedia",
+      sourceId: "eu-sedia",
+      opportunityKind: "procurement",
+      externalId: "69b193d7-f301-438d-8be9-726e790a2aca-CN",
+      deduplicationKey: "sedia:69b193d7-f301-438d-8be9-726e790a2aca-CN",
+      buyerName: "EU Funding & Tenders",
+      status: "open",
+      isEuFunded: true,
+      language: "en",
+      procedureType: "0"
     });
   });
 

@@ -22,11 +22,12 @@ Primary references:
 
 ## Product Decision
 
-Use TED as the immediate Western Europe ingestion layer for high-value notices, filtered
-by ICT, software, hardware, networking, support, and consulting CPVs. Keep national
-portals in the source catalog as planned connectors because they are required for
-below-threshold tenders, richer documents, local-language metadata, and bid-submission
-workflows.
+Use TED as the immediate Western Europe ingestion layer for high-value member-state
+notices, filtered by ICT, software, hardware, networking, support, and consulting CPVs.
+Use the EU Funding & Tenders / SEDIA search API as a separate active source for EU
+institution tenders. Keep national portals in the source catalog as planned connectors
+because they are required for below-threshold tenders, richer documents, local-language
+metadata, and bid-submission workflows.
 
 ## Added Market Coverage
 
@@ -49,9 +50,10 @@ workflows.
 ## Connector Roadmap
 
 1. TED multi-country ICT ingestion: active now.
-2. National portal discovery connectors: fetch search/listing pages, normalize local
+2. SEDIA EU Funding & Tenders ICT search ingestion: active now.
+3. National portal discovery connectors: fetch search/listing pages, normalize local
    opportunity metadata, and link official submission pages.
-3. National document connectors: download tender packs where public without login;
+4. National document connectors: download tender packs where public without login;
    otherwise mark registration-required and guide users to the portal.
-4. Award/contract history connectors: prioritize open-data portals first, especially Italy
+5. Award/contract history connectors: prioritize open-data portals first, especially Italy
    ANAC BDNCP/OCDS, Portugal BASE, TenderNed, BOAMP, and Hilma.

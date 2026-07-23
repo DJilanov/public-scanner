@@ -165,6 +165,74 @@ export function normalizeTedNoticeRecord(
   };
 }
 
+export function normalizeSediaResultRecord(
+  record: unknown,
+  options: { now?: Date } = {}
+): NormalizedOpportunity | undefined {
+  if (!isRecord(record)) {
+    return undefined;
+  }
+
+  const metadata = isRecord(record.metadata) ? record.metadata : {};
+  const externalId =
+    readFirstNestedField(record, metadata, "identifier") ??
+    readString(record.reference) ??
+    readFirstNestedField(record, metadata, "REFERENCE") ??
+    readString(record.url);
+  const title = normalizeWhitespace(
+    readFirstNestedField(record, metadata, "title") ??
+      readString(record.summary) ??
+      stripHtml(readString(record.content))
+  );
+  const sourceUrl =
+    readFirstNestedField(record, metadata, "url") ??
+    readFirstNestedField(record, metadata, "esST_URL") ??
+    readString(record.url);
+
+  if (!externalId || !title || !sourceUrl) {
+    return undefined;
+  }
+
+  const authorityName = normalizeWhitespace(
+    readFirstNestedField(record, metadata, "caName")
+  );
+  const publicationDate = normalizeDateString(
+    readFirstNestedField(record, metadata, "startDate") ??
+      readFirstNestedField(record, metadata, "es_SortDate")
+  );
+  const submissionDeadline = normalizeDateString(
+    readFirstNestedField(record, metadata, "deadlineDate")
+  );
+  const language =
+    readFirstNestedField(record, metadata, "language") ?? readString(record.language);
+  const procedureType = readFirstNestedField(record, metadata, "type");
+
+  return {
+    source: "sedia",
+    sourceId: "eu-sedia",
+    opportunityKind: "procurement",
+    externalId,
+    deduplicationKey: `sedia:${externalId}`,
+    title,
+    buyerName:
+      authorityName &&
+      authorityName.toLocaleLowerCase("en-US") !== title.toLocaleLowerCase("en-US")
+        ? authorityName
+        : "EU Funding & Tenders",
+    status: deriveStatus({
+      ...(submissionDeadline ? { submissionDeadline } : {}),
+      ...(options.now ? { now: options.now } : {})
+    }),
+    cpvCodes: [],
+    sourceUrl,
+    isEuFunded: true,
+    ...(language ? { language } : {}),
+    ...(publicationDate ? { publicationDate } : {}),
+    ...(submissionDeadline ? { submissionDeadline } : {}),
+    ...(procedureType ? { procedureType } : {})
+  };
+}
+
 export function normalizeCaisContractRecord(
   record: unknown
 ): NormalizedContract | undefined {
@@ -475,6 +543,23 @@ function readTedUrl(record: Record<string, unknown>, publicationNumber: string):
   );
 
   return htmlLink ?? `https://ted.europa.eu/en/notice/${publicationNumber}/html`;
+}
+
+function readFirstNestedField(
+  record: Record<string, unknown>,
+  metadata: Record<string, unknown>,
+  key: string
+): string | undefined {
+  return readFirstField(metadata, key) ?? readFirstField(record, key);
+}
+
+function stripHtml(value: string | undefined): string | undefined {
+  return value?.replace(/<[^>]*>/g, " ");
+}
+
+function normalizeWhitespace(value: string | undefined): string | undefined {
+  const normalized = value?.replace(/\s+/g, " ").trim();
+  return normalized ? normalized : undefined;
 }
 
 function extractTedPublicationNumber(value: string): string | undefined {
