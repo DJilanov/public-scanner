@@ -218,7 +218,18 @@ describe("worker ingestion", () => {
       risks: expect.arrayContaining([
         "AI risk: confirm SLA penalties.",
         "Missing data: award criteria weighting."
-      ])
+      ]),
+      aiAnalysis: expect.objectContaining({
+        provider: "injected",
+        model: "injected",
+        businessFitScore: 91,
+        readinessScore: 74,
+        commercialScore: 82,
+        dataConfidenceScore: 84,
+        complexity: "medium",
+        sectors: ["software", "cybersecurity"],
+        missingData: ["award criteria weighting"]
+      })
     });
   });
 

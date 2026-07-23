@@ -32,7 +32,8 @@ import type {
   SourceHealthItem,
   SupportedCountryCode,
   SupplierDashboardItem,
-  SavedOpportunityState
+  SavedOpportunityState,
+  TenderAiAnalysis
 } from "@public-scanner/domain";
 import type { QueryResultRow } from "pg";
 
@@ -283,6 +284,7 @@ export interface DocumentIntelligenceRow extends QueryResultRow {
   certifications: string[];
   risks: string[];
   extracted_at: Date | string | null;
+  ai_analysis: TenderAiAnalysis | null;
 }
 
 export interface CompetitorInsightRow extends QueryResultRow {
@@ -301,6 +303,7 @@ export interface DocumentIntelligenceInput {
   certifications: string[];
   risks: string[];
   extractedAt?: string;
+  aiAnalysis?: TenderAiAnalysis;
 }
 
 export interface AlertRuleRow extends QueryResultRow {

@@ -217,7 +217,8 @@ export class ApplyStudioRepository implements ApplyStudioRepositoryPort {
           required_documents,
           certifications,
           risks,
-          extracted_at
+          extracted_at,
+          ai_analysis
         FROM document_intelligence
         WHERE opportunity_id = $1
         LIMIT 1

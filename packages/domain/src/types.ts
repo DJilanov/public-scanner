@@ -276,6 +276,20 @@ export interface DocumentIntelligence {
   certifications: string[];
   risks: string[];
   extractedAt?: string;
+  aiAnalysis?: TenderAiAnalysis;
+}
+
+export interface TenderAiAnalysis {
+  provider: string;
+  model: string;
+  analyzedAt: string;
+  businessFitScore: number;
+  readinessScore: number;
+  commercialScore: number;
+  dataConfidenceScore: number;
+  complexity: "low" | "medium" | "high" | "unknown";
+  sectors: string[];
+  missingData: string[];
 }
 
 export type TenderDocumentKind =

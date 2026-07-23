@@ -11,10 +11,24 @@ const preferences = {
 
 const documentIntelligence = {
   status: "ready",
+  summary:
+    "AI-assisted (82/100 confidence): Relevant IT opportunity with a clear application path.",
   eligibilityCriteria: [],
   requiredDocuments: [],
   certifications: [],
-  risks: []
+  risks: [],
+  aiAnalysis: {
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    analyzedAt: "2026-07-23T08:00:00.000Z",
+    businessFitScore: 88,
+    readinessScore: 74,
+    commercialScore: 66,
+    dataConfidenceScore: 82,
+    complexity: "medium",
+    sectors: ["software", "hardware"],
+    missingData: ["award criteria"]
+  }
 };
 
 interface MockDocumentPackageItem {
@@ -246,6 +260,12 @@ test("preview exposes detected TED document and submission links", async ({ page
   await expect(
     page.getByRole("heading", { name: "Romania data center refresh" })
   ).toBeVisible();
+  const aiScorecard = page.locator(".ai-scorecard");
+  await expect(aiScorecard.getByText("AI scorecard")).toBeVisible();
+  await expect(aiScorecard.getByText("Business fit")).toBeVisible();
+  await expect(aiScorecard.getByText("88", { exact: true })).toBeVisible();
+  await expect(aiScorecard.getByText("deepseek-v4-flash")).toBeVisible();
+  await expect(aiScorecard.getByText("award criteria")).toBeVisible();
   await expect(
     page.getByText("Official attachment bundle", { exact: true })
   ).toBeVisible();

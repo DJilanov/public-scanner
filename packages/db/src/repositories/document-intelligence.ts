@@ -16,9 +16,10 @@ export async function upsertDocumentIntelligence(
         required_documents,
         certifications,
         risks,
-        extracted_at
+        extracted_at,
+        ai_analysis
       )
-      VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8)
+      VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9::jsonb)
       ON CONFLICT (opportunity_id) DO UPDATE SET
         status = excluded.status,
         summary = excluded.summary,
@@ -27,6 +28,7 @@ export async function upsertDocumentIntelligence(
         certifications = excluded.certifications,
         risks = excluded.risks,
         extracted_at = excluded.extracted_at,
+        ai_analysis = excluded.ai_analysis,
         updated_at = now()
     `,
     [
@@ -37,7 +39,8 @@ export async function upsertDocumentIntelligence(
       JSON.stringify(input.requiredDocuments),
       JSON.stringify(input.certifications),
       JSON.stringify(input.risks),
-      input.extractedAt ?? null
+      input.extractedAt ?? null,
+      input.aiAnalysis ? JSON.stringify(input.aiAnalysis) : null
     ]
   );
 }

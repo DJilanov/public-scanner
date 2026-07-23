@@ -443,6 +443,14 @@ const TRANSLATIONS = {
     selectedSectors: "Selected sectors",
     selectedSectorOpportunities: "Selected sector opportunities",
     bestSector: "Best sector",
+    aiScorecard: "AI scorecard",
+    businessFit: "Business fit",
+    commercial: "Commercial",
+    dataConfidence: "Data confidence",
+    analyzedAt: "Analyzed",
+    model: "Model",
+    missingData: "Missing data",
+    complexity: "Complexity",
     sector: "Sector",
     sectors: "Sectors",
     allSectors: "All sectors",
@@ -829,6 +837,14 @@ const TRANSLATIONS = {
     selectedSectors: "Избрани сектори",
     selectedSectorOpportunities: "Възможности по избрани сектори",
     bestSector: "Най-подходящ сектор",
+    aiScorecard: "AI оценка",
+    businessFit: "Бизнес съвпадение",
+    commercial: "Търговски потенциал",
+    dataConfidence: "Увереност в данните",
+    analyzedAt: "Анализирано",
+    model: "Модел",
+    missingData: "Липсващи данни",
+    complexity: "Сложност",
     sector: "Сектор",
     sectors: "Сектори",
     allSectors: "Всички сектори",
@@ -5595,6 +5611,9 @@ function OpportunityPreview({
             {formatGeneratedSummary(intelligence.summary, locale)}
           </p>
         ) : null}
+        {intelligence?.aiAnalysis ? (
+          <AiScorecard analysis={intelligence.aiAnalysis} locale={locale} />
+        ) : null}
         <Checklist
           title={t(locale, "eligibility")}
           items={intelligence?.eligibilityCriteria ?? []}
@@ -6018,6 +6037,66 @@ interface ChecklistProps {
   title: string;
   items: string[];
   locale: Locale;
+}
+
+interface AiScorecardProps {
+  analysis: NonNullable<DocumentIntelligence["aiAnalysis"]>;
+  locale: Locale;
+}
+
+function AiScorecard({ analysis, locale }: AiScorecardProps) {
+  const scores = [
+    { label: t(locale, "businessFit"), value: analysis.businessFitScore },
+    { label: t(locale, "readiness"), value: analysis.readinessScore },
+    { label: t(locale, "commercial"), value: analysis.commercialScore },
+    { label: t(locale, "dataConfidence"), value: analysis.dataConfidenceScore }
+  ];
+
+  return (
+    <div className="ai-scorecard">
+      <div className="section-heading compact-heading">
+        <h5>{t(locale, "aiScorecard")}</h5>
+        <span>{analysis.provider}</span>
+      </div>
+      <div className="ai-score-grid">
+        {scores.map((score) => (
+          <div key={score.label} className="ai-score-item">
+            <span>{score.label}</span>
+            <strong className={getCompactScoreClassName(score.value)}>
+              {score.value}
+            </strong>
+          </div>
+        ))}
+      </div>
+      <div className="ai-score-meta">
+        <span>
+          {t(locale, "complexity")}: {formatGeneratedText(analysis.complexity, locale)}
+        </span>
+        <span>
+          {t(locale, "model")}: {analysis.model}
+        </span>
+        <span>
+          {t(locale, "analyzedAt")}: {formatDate(analysis.analyzedAt, locale)}
+        </span>
+      </div>
+      {analysis.sectors.length > 0 ? (
+        <div className="tag-row">
+          <span>{t(locale, "sectors")}</span>
+          {analysis.sectors.slice(0, 5).map((sector) => (
+            <b key={sector}>{formatGeneratedText(sector, locale)}</b>
+          ))}
+        </div>
+      ) : null}
+      {analysis.missingData.length > 0 ? (
+        <div className="tag-row warning-tags">
+          <span>{t(locale, "missingData")}</span>
+          {analysis.missingData.slice(0, 5).map((item) => (
+            <b key={item}>{formatGeneratedText(item, locale)}</b>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function Checklist({ title, items, locale }: ChecklistProps) {
@@ -8310,4 +8389,20 @@ function getScoreClassName(score: number): string {
   }
 
   return "score";
+}
+
+function getCompactScoreClassName(score: number): string {
+  if (score >= 78) {
+    return "compact-score compact-score-strong";
+  }
+
+  if (score >= 62) {
+    return "compact-score compact-score-review";
+  }
+
+  if (score >= 48) {
+    return "compact-score compact-score-watch";
+  }
+
+  return "compact-score";
 }

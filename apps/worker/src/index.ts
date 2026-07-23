@@ -163,6 +163,8 @@ interface AiAnalysisRuntime {
   client: TenderAnalysisClient;
   maxPerRun: number;
   minScore: number;
+  model: string;
+  provider: string;
   remaining: number;
 }
 
@@ -207,6 +209,8 @@ export async function runOnce(options: WorkerRunOptions = {}): Promise<WorkerRun
         client: aiAnalysis.client,
         maxPerRun: remaining,
         minScore: aiAnalysis.minScore,
+        model: aiAnalysis.model,
+        provider: aiAnalysis.provider,
         remaining
       };
     };
@@ -802,7 +806,11 @@ async function buildAiAssistedDocumentIntelligence(input: {
       toDeepSeekTenderAnalysisRequest(input.opportunity)
     );
 
-    return mergeAiTenderAnalysis(input.baseIntelligence, analysis);
+    return mergeAiTenderAnalysis(input.baseIntelligence, analysis, {
+      analyzedAt: input.baseIntelligence.extractedAt ?? new Date().toISOString(),
+      model: input.aiAnalysis.model,
+      provider: input.aiAnalysis.provider
+    });
   } catch (error) {
     await recordSourceError(input.store, {
       source: input.source,
@@ -850,7 +858,12 @@ function toDeepSeekTenderAnalysisRequest(
 
 function mergeAiTenderAnalysis(
   baseIntelligence: DocumentIntelligence,
-  analysis: DeepSeekTenderAnalysis
+  analysis: DeepSeekTenderAnalysis,
+  metadata: {
+    analyzedAt: string;
+    model: string;
+    provider: string;
+  }
 ): DocumentIntelligenceInput {
   const aiRisks = [
     ...analysis.risks,
@@ -889,6 +902,18 @@ function mergeAiTenderAnalysis(
       baseIntelligence.certifications
     ),
     risks: mergeStringLists(aiRisks, baseRisks),
+    aiAnalysis: {
+      provider: metadata.provider,
+      model: metadata.model,
+      analyzedAt: metadata.analyzedAt,
+      businessFitScore: analysis.businessFitScore,
+      readinessScore: analysis.readinessScore,
+      commercialScore: analysis.commercialScore,
+      dataConfidenceScore: analysis.dataConfidenceScore,
+      complexity: analysis.complexity,
+      sectors: analysis.sectors,
+      missingData: analysis.missingData
+    },
     ...(baseIntelligence.extractedAt ? { extractedAt: baseIntelligence.extractedAt } : {})
   };
 }
@@ -1223,6 +1248,8 @@ function createAiAnalysisRuntime(
       client: options.aiAnalyzer,
       maxPerRun,
       minScore,
+      model: "injected",
+      provider: "injected",
       remaining: maxPerRun
     };
   }
@@ -1234,11 +1261,12 @@ function createAiAnalysisRuntime(
   }
 
   const maxTokens = parsePositiveIntegerEnv("DEEPSEEK_MAX_TOKENS");
+  const model = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash";
 
   return {
     client: new DeepSeekClient({
       apiKey,
-      model: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash",
+      model,
       ...(process.env.DEEPSEEK_BASE_URL
         ? { baseUrl: process.env.DEEPSEEK_BASE_URL }
         : {}),
@@ -1246,6 +1274,8 @@ function createAiAnalysisRuntime(
     }),
     maxPerRun,
     minScore,
+    model,
+    provider: "deepseek",
     remaining: maxPerRun
   };
 }

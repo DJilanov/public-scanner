@@ -1483,6 +1483,90 @@ meter {
   line-height: 1.45;
 }
 
+.ai-scorecard {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface-raised);
+}
+
+.compact-heading h5 {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.ai-score-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ai-score-item {
+  display: grid;
+  gap: 4px;
+  min-height: 58px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--surface);
+}
+
+.ai-score-item span,
+.ai-score-meta,
+.tag-row span {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.compact-score {
+  color: var(--text-soft);
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.compact-score-strong {
+  color: var(--accent);
+}
+
+.compact-score-review {
+  color: var(--warning);
+}
+
+.compact-score-watch {
+  color: var(--risk);
+}
+
+.ai-score-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.tag-row b {
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: var(--surface);
+  color: var(--text-soft);
+  font-size: 0.76rem;
+}
+
+.warning-tags b {
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--border-soft));
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
 .checklist ul {
   display: grid;
   gap: 6px;

@@ -28,7 +28,8 @@ import type {
   SavedOpportunityState,
   SourceHealthItem,
   SupportedCountryCode,
-  SupplierDashboardItem
+  SupplierDashboardItem,
+  TenderAiAnalysis
 } from "@public-scanner/domain";
 import type { QueryResultRow } from "pg";
 
@@ -60,6 +61,7 @@ interface DashboardDocumentColumns {
   document_certifications: string[] | null;
   document_risks: string[] | null;
   document_extracted_at: Date | string | null;
+  document_ai_analysis: unknown;
 }
 
 interface PipelineDashboardRow
@@ -354,7 +356,8 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
             required_documents,
             certifications,
             risks,
-            extracted_at
+            extracted_at,
+            ai_analysis
           FROM document_intelligence
           WHERE opportunity_id = $1
           LIMIT 1
@@ -471,7 +474,8 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
             di.required_documents AS document_required_documents,
             di.certifications AS document_certifications,
             di.risks AS document_risks,
-            di.extracted_at AS document_extracted_at
+            di.extracted_at AS document_extracted_at,
+            di.ai_analysis AS document_ai_analysis
           FROM saved_opportunities s
           INNER JOIN opportunities o ON o.id = s.opportunity_id
           LEFT JOIN opportunity_matches m ON m.opportunity_id = o.id
@@ -513,7 +517,8 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
             di.required_documents AS document_required_documents,
             di.certifications AS document_certifications,
             di.risks AS document_risks,
-            di.extracted_at AS document_extracted_at
+            di.extracted_at AS document_extracted_at,
+            di.ai_analysis AS document_ai_analysis
           FROM opportunities o
           LEFT JOIN opportunity_matches m ON m.opportunity_id = o.id
           LEFT JOIN saved_opportunities s
@@ -1252,7 +1257,8 @@ function mapDashboardDocumentIntelligence(
     ...(row.document_summary !== null ? { summary: row.document_summary } : {}),
     ...(row.document_extracted_at
       ? { extractedAt: normalizeDbDate(row.document_extracted_at) }
-      : {})
+      : {}),
+    ...mapOptionalAiAnalysis(row.document_ai_analysis)
   };
 }
 
@@ -1335,7 +1341,8 @@ function mapDocumentIntelligenceRow(row: DocumentIntelligenceRow): DocumentIntel
     certifications: safeStringArray(row.certifications),
     risks: safeStringArray(row.risks),
     ...(row.summary !== null ? { summary: row.summary } : {}),
-    ...(row.extracted_at ? { extractedAt: normalizeDbDate(row.extracted_at) } : {})
+    ...(row.extracted_at ? { extractedAt: normalizeDbDate(row.extracted_at) } : {}),
+    ...mapOptionalAiAnalysis(row.ai_analysis)
   };
 }
 
@@ -1387,6 +1394,75 @@ function safeStringArray(value: unknown): string[] {
   }
 
   return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function mapOptionalAiAnalysis(
+  value: unknown
+): { aiAnalysis: TenderAiAnalysis } | Record<string, never> {
+  const aiAnalysis = parseTenderAiAnalysis(value);
+  return aiAnalysis ? { aiAnalysis } : {};
+}
+
+function parseTenderAiAnalysis(value: unknown): TenderAiAnalysis | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const provider = readString(value.provider);
+  const model = readString(value.model);
+  const analyzedAt = readString(value.analyzedAt);
+  const businessFitScore = readScore(value.businessFitScore);
+  const readinessScore = readScore(value.readinessScore);
+  const commercialScore = readScore(value.commercialScore);
+  const dataConfidenceScore = readScore(value.dataConfidenceScore);
+  const complexity = readComplexity(value.complexity);
+
+  if (
+    !provider ||
+    !model ||
+    !analyzedAt ||
+    businessFitScore === undefined ||
+    readinessScore === undefined ||
+    commercialScore === undefined ||
+    dataConfidenceScore === undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    provider,
+    model,
+    analyzedAt,
+    businessFitScore,
+    readinessScore,
+    commercialScore,
+    dataConfidenceScore,
+    complexity,
+    sectors: safeStringArray(value.sectors),
+    missingData: safeStringArray(value.missingData)
+  };
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function readScore(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+function readComplexity(value: unknown): TenderAiAnalysis["complexity"] {
+  return value === "low" || value === "medium" || value === "high" || value === "unknown"
+    ? value
+    : "unknown";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 interface SqlWhere {
