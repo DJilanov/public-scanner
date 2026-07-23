@@ -161,6 +161,7 @@ interface IngestSourceOptions {
 
 interface AiAnalysisRuntime {
   client: TenderAnalysisClient;
+  maxPerRun: number;
   minScore: number;
   remaining: number;
 }
@@ -187,14 +188,37 @@ export async function runOnce(options: WorkerRunOptions = {}): Promise<WorkerRun
   try {
     const result: WorkerRunResult = {};
     const aiAnalysis = createAiAnalysisRuntime(options);
+    const aiAnalysisBudgets = aiAnalysis
+      ? allocateAiAnalysisBudgets(aiAnalysis.maxPerRun, getEnabledSourceCount(options))
+      : [];
+    let aiAnalysisBudgetIndex = 0;
+    const nextAiAnalysisRuntime = (): AiAnalysisRuntime | undefined => {
+      if (!aiAnalysis) {
+        return undefined;
+      }
+
+      const remaining = aiAnalysisBudgets[aiAnalysisBudgetIndex] ?? 0;
+      aiAnalysisBudgetIndex += 1;
+      if (remaining <= 0) {
+        return undefined;
+      }
+
+      return {
+        client: aiAnalysis.client,
+        maxPerRun: remaining,
+        minScore: aiAnalysis.minScore,
+        remaining
+      };
+    };
 
     if (options.includeCais ?? true) {
+      const sourceAiAnalysis = nextAiAnalysisRuntime();
       result.cais = await ingestCais({
         sourceDate,
         now,
         store,
         client: options.caisClient ?? new CaisOpenDataClient(),
-        ...(aiAnalysis ? { aiAnalysis } : {})
+        ...(sourceAiAnalysis ? { aiAnalysis: sourceAiAnalysis } : {})
       });
     }
 
@@ -208,13 +232,14 @@ export async function runOnce(options: WorkerRunOptions = {}): Promise<WorkerRun
       });
       result.tedCountryCodes = tedCountryCodes;
       result.tedQuery = tedQuery;
+      const sourceAiAnalysis = nextAiAnalysisRuntime();
       result.ted = await ingestTed({
         sourceDate,
         now,
         store,
         query: tedQuery,
         client: options.tedClient ?? new TedClient(),
-        ...(aiAnalysis ? { aiAnalysis } : {}),
+        ...(sourceAiAnalysis ? { aiAnalysis: sourceAiAnalysis } : {}),
         ...(options.tedMaxPages !== undefined ? { maxPages: options.tedMaxPages } : {})
       });
     }
@@ -222,13 +247,14 @@ export async function runOnce(options: WorkerRunOptions = {}): Promise<WorkerRun
     if (options.includeSedia ?? true) {
       const sediaSearchTerms = normalizeSediaSearchTerms(options.sediaSearchTerms);
       result.sediaSearchTerms = sediaSearchTerms;
+      const sourceAiAnalysis = nextAiAnalysisRuntime();
       result.sedia = await ingestSedia({
         sourceDate,
         now,
         store,
         searchTerms: sediaSearchTerms,
         client: options.sediaClient ?? new SediaClient(),
-        ...(aiAnalysis ? { aiAnalysis } : {}),
+        ...(sourceAiAnalysis ? { aiAnalysis: sourceAiAnalysis } : {}),
         ...(options.sediaPageSize !== undefined
           ? { pageSize: options.sediaPageSize }
           : {}),
@@ -1195,6 +1221,7 @@ function createAiAnalysisRuntime(
   if (options.aiAnalyzer) {
     return {
       client: options.aiAnalyzer,
+      maxPerRun,
       minScore,
       remaining: maxPerRun
     };
@@ -1217,9 +1244,33 @@ function createAiAnalysisRuntime(
         : {}),
       ...(maxTokens !== undefined ? { maxTokens } : {})
     }),
+    maxPerRun,
     minScore,
     remaining: maxPerRun
   };
+}
+
+function getEnabledSourceCount(options: WorkerRunOptions): number {
+  return [
+    options.includeCais ?? true,
+    options.includeTed ?? true,
+    options.includeSedia ?? true
+  ].filter(Boolean).length;
+}
+
+function allocateAiAnalysisBudgets(maxPerRun: number, sourceCount: number): number[] {
+  if (maxPerRun <= 0 || sourceCount <= 0) {
+    return [];
+  }
+
+  const baseBudget = Math.floor(maxPerRun / sourceCount);
+  let remainder = maxPerRun % sourceCount;
+
+  return Array.from({ length: sourceCount }, () => {
+    const budget = baseBudget + (remainder > 0 ? 1 : 0);
+    remainder = Math.max(0, remainder - 1);
+    return budget;
+  });
 }
 
 function getSourceDatesFromEnvironment(now: Date): string[] {

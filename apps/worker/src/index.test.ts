@@ -268,6 +268,108 @@ describe("worker ingestion", () => {
     );
   });
 
+  it("splits AI analysis budget across enabled sources", async () => {
+    const store = new MemoryIngestionStore();
+    const caisClient = buildCaisClient([
+      {
+        tenderId: 572277,
+        subject: "Software implementation platform",
+        buyerName: "Public buyer",
+        mainCpvCode: "72230000",
+        submissionDeadline: "2026-08-10T00:00:00.000Z"
+      },
+      {
+        tenderId: 572278,
+        subject: "Software support portal",
+        buyerName: "Public buyer",
+        mainCpvCode: "72261000",
+        submissionDeadline: "2026-08-10T00:00:00.000Z"
+      },
+      {
+        tenderId: 572279,
+        subject: "Computer hardware delivery",
+        buyerName: "Public buyer",
+        mainCpvCode: "30200000",
+        submissionDeadline: "2026-08-10T00:00:00.000Z"
+      }
+    ]);
+    const tedClient: TedNoticeClient = {
+      async searchAllNotices() {
+        return {
+          totalNoticeCount: 1,
+          notices: [
+            {
+              "publication-number": ["510019-2026"],
+              "notice-title": ["Managed IT services 2026"],
+              "description-proc": ["Managed IT support and service desk."],
+              "buyer-name": ["EU buyer"],
+              "classification-cpv": ["72000000"],
+              "deadline-receipt-tender-date-lot": ["2026-08-10+02:00"],
+              links: ["https://ted.europa.eu/en/notice/510019-2026/html"]
+            }
+          ]
+        };
+      }
+    };
+    const sediaClient: SediaOpportunityClient = {
+      async searchAll() {
+        return {
+          totalResults: 1,
+          results: [
+            {
+              reference: "sedia-ref",
+              url: "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/tender-details/sedia-ref",
+              metadata: {
+                identifier: ["sedia-ref"],
+                title: ["Cloud software platform"],
+                description: ["Secure cloud software implementation and support."],
+                deadlineDate: ["2026-08-10T17:00:59.000+0000"],
+                startDate: ["2026-07-22T00:00:00.000+0000"],
+                type: ["0"]
+              }
+            }
+          ]
+        };
+      }
+    };
+    const capturedSources: string[] = [];
+    const aiAnalyzer: TenderAnalysisClient = {
+      async analyzeTender(request) {
+        capturedSources.push(request.source);
+
+        return {
+          summary: "Relevant opportunity.",
+          businessFitScore: 80,
+          readinessScore: 70,
+          commercialScore: 65,
+          dataConfidenceScore: 75,
+          complexity: "medium",
+          sectors: ["software"],
+          eligibilityCriteria: [],
+          requiredDocuments: [],
+          certifications: [],
+          risks: [],
+          missingData: []
+        };
+      }
+    };
+
+    await runOnce({
+      sourceDate: "2026-07-22",
+      now: new Date("2026-07-23T00:00:00.000Z"),
+      store,
+      caisClient,
+      tedClient,
+      sediaClient,
+      sediaSearchTerms: ["cloud"],
+      aiAnalyzer,
+      aiAnalysisMaxPerRun: 3,
+      aiAnalysisMinScore: 1
+    });
+
+    expect(capturedSources).toEqual(["cais-eop", "ted", "sedia"]);
+  });
+
   it("ingests CAIS contracts, annexes, and OCDS lots", async () => {
     const store = new MemoryIngestionStore();
     const caisClient: CaisDailyClient = {
