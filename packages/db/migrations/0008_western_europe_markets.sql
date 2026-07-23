@@ -1,4 +1,4 @@
-INSERT INTO sources (
+INSERT INTO source_catalog (
   id,
   display_name,
   family,
