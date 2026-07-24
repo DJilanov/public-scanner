@@ -16,7 +16,14 @@ module.exports = {
         API_HOST: process.env.API_HOST || "127.0.0.1",
         API_PORT: process.env.API_PORT || "3201",
         DATABASE_URL: process.env.DATABASE_URL,
-        SESSION_TTL_DAYS: process.env.SESSION_TTL_DAYS || "14"
+        SESSION_TTL_DAYS: process.env.SESSION_TTL_DAYS || "14",
+        AI_ANALYSIS_ENABLED:
+          process.env.AI_ANALYSIS_ENABLED ||
+          (process.env.DEEPSEEK_API_KEY ? "true" : "false"),
+        DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
+        DEEPSEEK_MODEL: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash",
+        DEEPSEEK_BASE_URL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
+        DEEPSEEK_MAX_TOKENS: process.env.DEEPSEEK_MAX_TOKENS || "1800"
       }
     },
     {
@@ -44,9 +51,7 @@ module.exports = {
           "software,hardware,cybersecurity,cloud,network,data,digital,IT services",
         SEDIA_PAGE_SIZE: process.env.SEDIA_PAGE_SIZE || "50",
         SEDIA_MAX_PAGES: process.env.SEDIA_MAX_PAGES || "3",
-        AI_ANALYSIS_ENABLED:
-          process.env.AI_ANALYSIS_ENABLED ||
-          (process.env.DEEPSEEK_API_KEY ? "true" : "false"),
+        AI_ANALYSIS_AUTO_ENABLED: process.env.AI_ANALYSIS_AUTO_ENABLED || "false",
         AI_ANALYSIS_MAX_PER_RUN: process.env.AI_ANALYSIS_MAX_PER_RUN || "25",
         AI_ANALYSIS_MIN_SCORE: process.env.AI_ANALYSIS_MIN_SCORE || "62",
         DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,

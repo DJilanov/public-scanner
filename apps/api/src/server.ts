@@ -1,3 +1,4 @@
+import { DeepSeekClient, type DeepSeekClientOptions } from "@public-scanner/connectors";
 import {
   AlertRuleRepository,
   ApplyStudioRepository,
@@ -19,9 +20,11 @@ import {
 } from "@public-scanner/db";
 import {
   BUSINESS_PROFILES,
+  buildTenderAiAnalysisRequest,
   buildTenderDocumentPackage,
   DEFAULT_SELECTED_COUNTRY_CODES,
   INTERNATIONAL_SOURCE_IDS,
+  mergeTenderAiAnalysis,
   normalizeCountryCode,
   normalizeSourceIds,
   type AlertChannel,
@@ -39,7 +42,9 @@ import {
   type OpportunityKind,
   type OpportunityStatus,
   type ProcurementDashboard,
-  type SupportedCountryCode
+  type SupportedCountryCode,
+  type TenderAiAnalysisDraft,
+  type TenderAiAnalysisRequest
 } from "@public-scanner/domain";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { pathToFileURL } from "node:url";
@@ -58,6 +63,17 @@ export interface ServerOptions {
   alertRules?: AlertRuleRepositoryPort;
   applyStudio?: ApplyStudioRepositoryPort;
   auth?: AuthRepositoryPort | false;
+  aiAnalysis?: ManualAiAnalysisRuntime | false;
+}
+
+export interface ManualAiAnalysisClient {
+  analyzeTender(request: TenderAiAnalysisRequest): Promise<TenderAiAnalysisDraft>;
+}
+
+export interface ManualAiAnalysisRuntime {
+  client: ManualAiAnalysisClient;
+  model: string;
+  provider: string;
 }
 
 interface LoginPayload {
@@ -100,6 +116,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     options.auth === false
       ? undefined
       : (options.auth ?? (pool ? new AuthRepository(pool) : undefined));
+  const aiAnalysis =
+    options.aiAnalysis === false
+      ? undefined
+      : (options.aiAnalysis ?? createManualAiAnalysisRuntime());
   const server = Fastify({
     logger: true
   });
@@ -430,6 +450,82 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     return { data: detail };
   });
 
+  server.post("/api/opportunities/:id/ai-analysis", async (request, reply) => {
+    const params = request.params as { id?: string };
+    if (!params.id) {
+      return reply.status(400).send({ error: "Missing opportunity id" });
+    }
+
+    if (!aiAnalysis) {
+      return reply.status(501).send({ error: "Paid AI analysis is not configured" });
+    }
+
+    if (!opportunities.getDetailById || !opportunities.saveDocumentIntelligence) {
+      return reply
+        .status(501)
+        .send({ error: "Document intelligence storage is not configured" });
+    }
+
+    let detail: OpportunityDetail | undefined;
+    try {
+      detail = await opportunities.getDetailById(params.id);
+    } catch (error) {
+      request.log.error({ error }, "Failed to read opportunity for paid AI analysis");
+      return reply.status(503).send({ error: "Opportunity storage unavailable" });
+    }
+
+    if (!detail) {
+      return reply.status(404).send({ error: "Opportunity not found" });
+    }
+
+    let analysis: TenderAiAnalysisDraft;
+    try {
+      analysis = await aiAnalysis.client.analyzeTender(
+        buildTenderAiAnalysisRequest(detail.opportunity)
+      );
+    } catch (error) {
+      request.log.error({ error }, "Failed to run paid AI analysis");
+      return reply.status(502).send({ error: "Paid AI analysis failed" });
+    }
+
+    const documentIntelligence = mergeTenderAiAnalysis(
+      detail.documentIntelligence ?? emptyDocumentIntelligence(),
+      analysis,
+      {
+        analyzedAt: new Date().toISOString(),
+        model: aiAnalysis.model,
+        provider: aiAnalysis.provider
+      }
+    );
+
+    try {
+      await opportunities.saveDocumentIntelligence(params.id, documentIntelligence);
+
+      return {
+        data: (await opportunities.getDetailById(params.id)) ?? {
+          ...detail,
+          documentIntelligence,
+          opportunity: {
+            ...detail.opportunity,
+            aiAnalysis: documentIntelligence.aiAnalysis
+          },
+          documentPackage: buildTenderDocumentPackage({
+            opportunity: detail.opportunity,
+            lots: detail.lots,
+            contracts: detail.contracts,
+            amendments: detail.amendments,
+            documentIntelligence
+          })
+        }
+      };
+    } catch (error) {
+      request.log.error({ error }, "Failed to save paid AI analysis");
+      return reply
+        .status(503)
+        .send({ error: "Document intelligence storage unavailable" });
+    }
+  });
+
   server.put("/api/opportunities/:id/pipeline", async (request, reply) => {
     const params = request.params as { id?: string };
     if (!params.id) {
@@ -528,6 +624,48 @@ async function readSession(
   }
 
   return auth.findSessionByTokenHash(hashSessionToken(token));
+}
+
+function createManualAiAnalysisRuntime(): ManualAiAnalysisRuntime | undefined {
+  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
+  const enabled = parseBooleanEnv("AI_ANALYSIS_ENABLED", Boolean(apiKey));
+  if (!enabled || !apiKey) {
+    return undefined;
+  }
+
+  const model = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash";
+  const maxTokens = process.env.DEEPSEEK_MAX_TOKENS
+    ? parsePositiveInteger(process.env.DEEPSEEK_MAX_TOKENS)
+    : undefined;
+  const clientOptions: DeepSeekClientOptions = {
+    apiKey,
+    model,
+    ...(process.env.DEEPSEEK_BASE_URL ? { baseUrl: process.env.DEEPSEEK_BASE_URL } : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {})
+  };
+
+  return {
+    client: new DeepSeekClient(clientOptions),
+    model,
+    provider: "deepseek"
+  };
+}
+
+function parseBooleanEnv(name: string, fallback: boolean): boolean {
+  const value = process.env[name]?.trim().toLowerCase();
+  if (!value) {
+    return fallback;
+  }
+
+  if (["1", "true", "yes", "on"].includes(value)) {
+    return true;
+  }
+
+  if (["0", "false", "no", "off"].includes(value)) {
+    return false;
+  }
+
+  return fallback;
 }
 
 async function readRequestPreferences(
@@ -702,13 +840,7 @@ function getSessionExpiry(): Date {
 }
 
 function buildEmptyOpportunityDetail(opportunity: Opportunity): OpportunityDetail {
-  const documentIntelligence: DocumentIntelligence = {
-    status: "not-available",
-    eligibilityCriteria: [],
-    requiredDocuments: [],
-    certifications: [],
-    risks: []
-  };
+  const documentIntelligence = emptyDocumentIntelligence();
 
   return {
     opportunity,
@@ -721,6 +853,16 @@ function buildEmptyOpportunityDetail(opportunity: Opportunity): OpportunityDetai
       documentIntelligence
     }),
     competitorInsights: []
+  };
+}
+
+function emptyDocumentIntelligence(): DocumentIntelligence {
+  return {
+    status: "not-available",
+    eligibilityCriteria: [],
+    requiredDocuments: [],
+    certifications: [],
+    risks: []
   };
 }
 

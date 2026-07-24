@@ -108,6 +108,10 @@ export interface OpportunityRepositoryPort {
     opportunityId: string,
     input: PipelineStateInput
   ): Promise<SavedOpportunityState>;
+  saveDocumentIntelligence?(
+    opportunityId: string,
+    input: DocumentIntelligenceInput
+  ): Promise<void>;
 }
 
 export interface OpportunityWriterPort extends OpportunityRepositoryPort {

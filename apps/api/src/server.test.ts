@@ -7,6 +7,7 @@ import type {
   AuthUser,
   AuthUserInput,
   ComplianceItemUpdateInput,
+  DocumentIntelligenceInput,
   OpportunityListFilters,
   OpportunityRepositoryPort,
   PipelineStateInput,
@@ -19,6 +20,7 @@ import type {
   ApplyStudioData,
   ComplianceItem,
   ComplianceItemInput,
+  DocumentIntelligence,
   EvidenceItem,
   EvidenceItemInput,
   Opportunity,
@@ -26,7 +28,7 @@ import type {
   ProcurementDashboard,
   SavedOpportunityState
 } from "@public-scanner/domain";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { hashPassword } from "./auth.js";
 import { buildServer } from "./server.js";
@@ -51,6 +53,15 @@ const opportunity: Opportunity = {
   }
 };
 
+const baseDocumentIntelligence: DocumentIntelligence = {
+  status: "ready",
+  summary: "Software Development fit 82/100.",
+  eligibilityCriteria: ["Check references."],
+  requiredDocuments: ["Technical proposal."],
+  certifications: ["No certification signal detected in structured metadata."],
+  risks: ["Verify official documents."]
+};
+
 const opportunityDetail: OpportunityDetail = {
   opportunity,
   lots: [],
@@ -60,14 +71,7 @@ const opportunityDetail: OpportunityDetail = {
     stage: "reviewing",
     owner: "Dimitar"
   },
-  documentIntelligence: {
-    status: "ready",
-    summary: "Software Development fit 82/100.",
-    eligibilityCriteria: ["Check references."],
-    requiredDocuments: ["Technical proposal."],
-    certifications: ["No certification signal detected in structured metadata."],
-    risks: ["Verify official documents."]
-  },
+  documentIntelligence: baseDocumentIntelligence,
   competitorInsights: []
 };
 
@@ -186,6 +190,8 @@ class FakeOpportunityRepository implements OpportunityRepositoryPort {
   public lastFilters: OpportunityListFilters | undefined;
   public lastDashboardFilters: OpportunityListFilters | undefined;
   public lastPipelineInput: PipelineStateInput | undefined;
+  public lastDocumentIntelligence:
+    { opportunityId: string; input: DocumentIntelligenceInput } | undefined;
 
   public async list(filters: OpportunityListFilters = {}): Promise<Opportunity[]> {
     this.lastFilters = filters;
@@ -197,7 +203,25 @@ class FakeOpportunityRepository implements OpportunityRepositoryPort {
   }
 
   public async getDetailById(id: string): Promise<OpportunityDetail | undefined> {
-    return id === opportunity.id ? opportunityDetail : undefined;
+    if (id !== opportunity.id) {
+      return undefined;
+    }
+
+    const documentIntelligence =
+      this.lastDocumentIntelligence?.opportunityId === id
+        ? this.lastDocumentIntelligence.input
+        : baseDocumentIntelligence;
+
+    return {
+      ...opportunityDetail,
+      opportunity: {
+        ...opportunityDetail.opportunity,
+        ...(documentIntelligence.aiAnalysis
+          ? { aiAnalysis: documentIntelligence.aiAnalysis }
+          : {})
+      },
+      documentIntelligence
+    };
   }
 
   public async getDashboard(
@@ -224,6 +248,13 @@ class FakeOpportunityRepository implements OpportunityRepositoryPort {
       ...(input.dueDate ? { dueDate: input.dueDate } : {}),
       ...(input.decisionReason ? { decisionReason: input.decisionReason } : {})
     };
+  }
+
+  public async saveDocumentIntelligence(
+    opportunityId: string,
+    input: DocumentIntelligenceInput
+  ): Promise<void> {
+    this.lastDocumentIntelligence = { opportunityId, input };
   }
 }
 
@@ -593,6 +624,87 @@ describe("api server", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ data: opportunityDetail });
+
+    await server.close();
+  });
+
+  it("runs paid AI analysis for a selected opportunity", async () => {
+    const repository = new FakeOpportunityRepository();
+    const analyzeTender = vi.fn(async () => ({
+      summary: "Strong software fit with clear delivery work.",
+      businessFitScore: 91,
+      readinessScore: 74,
+      commercialScore: 68,
+      dataConfidenceScore: 83,
+      complexity: "medium" as const,
+      sectors: ["software"],
+      eligibilityCriteria: ["Confirm public-sector references."],
+      requiredDocuments: ["Implementation methodology."],
+      certifications: ["ISO 27001 may be requested."],
+      risks: ["Verify award criteria."],
+      missingData: ["award criteria"]
+    }));
+    const server = buildServer({
+      opportunities: repository,
+      aiAnalysis: {
+        client: { analyzeTender },
+        model: "deepseek-v4-flash",
+        provider: "deepseek"
+      }
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/opportunities/opportunity-1/ai-analysis"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(analyzeTender).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: opportunity.title,
+        buyerName: opportunity.buyerName,
+        source: opportunity.source,
+        cpvCodes: opportunity.cpvCodes
+      })
+    );
+    expect(repository.lastDocumentIntelligence).toMatchObject({
+      opportunityId: opportunity.id,
+      input: {
+        status: "ready",
+        aiAnalysis: expect.objectContaining({
+          provider: "deepseek",
+          model: "deepseek-v4-flash",
+          businessFitScore: 91,
+          readinessScore: 74,
+          dataConfidenceScore: 83
+        })
+      }
+    });
+    expect(response.json().data.documentIntelligence.aiAnalysis).toMatchObject({
+      businessFitScore: 91,
+      model: "deepseek-v4-flash"
+    });
+
+    await server.close();
+  });
+
+  it("keeps paid AI analysis unavailable when it is not configured", async () => {
+    const repository = new FakeOpportunityRepository();
+    const server = buildServer({
+      opportunities: repository,
+      aiAnalysis: false
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/opportunities/opportunity-1/ai-analysis"
+    });
+
+    expect(response.statusCode).toBe(501);
+    expect(response.json()).toEqual({
+      error: "Paid AI analysis is not configured"
+    });
+    expect(repository.lastDocumentIntelligence).toBeUndefined();
 
     await server.close();
   });

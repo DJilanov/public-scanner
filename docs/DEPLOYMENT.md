@@ -61,9 +61,11 @@ nano .env.pm2
 Set `DATABASE_URL` to the host PostgreSQL database. `SESSION_TTL_DAYS` controls admin
 session lifetime and defaults to 14 days.
 
-Optional AI-assisted tender intelligence is controlled by `AI_ANALYSIS_ENABLED`,
-`AI_ANALYSIS_MAX_PER_RUN`, `AI_ANALYSIS_MIN_SCORE`, and the `DEEPSEEK_*` variables. Keep
-`DEEPSEEK_API_KEY` only in `.env.pm2`; do not commit it.
+Manual paid AI tender intelligence is controlled by `AI_ANALYSIS_ENABLED` and the
+`DEEPSEEK_*` variables. Scheduled ingestion uses local scoring only unless
+`AI_ANALYSIS_AUTO_ENABLED=true` is set; then `AI_ANALYSIS_MAX_PER_RUN` and
+`AI_ANALYSIS_MIN_SCORE` control automatic worker spend. Keep `DEEPSEEK_API_KEY` only in
+`.env.pm2`; do not commit it.
 
 Create or rotate an admin account:
 

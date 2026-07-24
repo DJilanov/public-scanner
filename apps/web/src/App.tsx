@@ -462,6 +462,11 @@ const TRANSLATIONS = {
     model: "Model",
     missingData: "Missing data",
     complexity: "Complexity",
+    runPaidAiAnalysis: "Run paid AI",
+    refreshPaidAiAnalysis: "Refresh paid AI",
+    runningAiAnalysis: "Running AI",
+    aiAnalysisFailed: "Paid AI analysis failed",
+    aiAnalysisNotConfigured: "Paid AI analysis is not configured.",
     sector: "Sector",
     sectors: "Sectors",
     allSectors: "All sectors",
@@ -869,6 +874,11 @@ const TRANSLATIONS = {
     model: "Модел",
     missingData: "Липсващи данни",
     complexity: "Сложност",
+    runPaidAiAnalysis: "Пусни платен AI",
+    refreshPaidAiAnalysis: "Обнови платен AI",
+    runningAiAnalysis: "AI анализ",
+    aiAnalysisFailed: "Платеният AI анализ не беше успешен",
+    aiAnalysisNotConfigured: "Платеният AI анализ не е конфигуриран.",
     sector: "Сектор",
     sectors: "Сектори",
     allSectors: "Всички сектори",
@@ -1533,11 +1543,13 @@ export function App() {
   const [evidenceSaving, setEvidenceSaving] = useState(false);
   const [complianceSavingId, setComplianceSavingId] = useState<string>();
   const [alertSaving, setAlertSaving] = useState(false);
+  const [aiAnalysisSaving, setAiAnalysisSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>();
   const [dashboardErrorMessage, setDashboardErrorMessage] = useState<string>();
   const [applyStudioErrorMessage, setApplyStudioErrorMessage] = useState<string>();
   const [detailErrorMessage, setDetailErrorMessage] = useState<string>();
   const [pipelineErrorMessage, setPipelineErrorMessage] = useState<string>();
+  const [aiAnalysisErrorMessage, setAiAnalysisErrorMessage] = useState<string>();
   const [alertErrorMessage, setAlertErrorMessage] = useState<string>();
   const [preferenceErrorMessage, setPreferenceErrorMessage] = useState<string>();
   const [selectedOpportunityId, setSelectedOpportunityId] = useState<string>();
@@ -1639,11 +1651,13 @@ export function App() {
     setEvidenceSaving(false);
     setComplianceSavingId(undefined);
     setAlertSaving(false);
+    setAiAnalysisSaving(false);
     setErrorMessage(undefined);
     setDashboardErrorMessage(undefined);
     setApplyStudioErrorMessage(undefined);
     setDetailErrorMessage(undefined);
     setPipelineErrorMessage(undefined);
+    setAiAnalysisErrorMessage(undefined);
     setAlertErrorMessage(undefined);
     setSelectedOpportunityId(undefined);
     setSelectedDetail(undefined);
@@ -2189,6 +2203,7 @@ export function App() {
     setDetailLoadState("loading");
     setDetailErrorMessage(undefined);
     setPipelineErrorMessage(undefined);
+    setAiAnalysisErrorMessage(undefined);
 
     async function loadDetail(): Promise<void> {
       try {
@@ -2284,6 +2299,59 @@ export function App() {
     pipelineForm,
     selectedDetail?.opportunity.id
   ]);
+
+  const runPaidAiAnalysis = useCallback(async () => {
+    const opportunityId = selectedDetail?.opportunity.id;
+    if (!opportunityId) {
+      return;
+    }
+
+    setAiAnalysisSaving(true);
+    setAiAnalysisErrorMessage(undefined);
+
+    try {
+      const response = await fetch(
+        `/api/opportunities/${encodeURIComponent(opportunityId)}/ai-analysis`,
+        {
+          method: "POST"
+        }
+      );
+
+      if (response.status === 401) {
+        handleUnauthenticated();
+        return;
+      }
+
+      if (response.status === 501) {
+        throw new Error(t(locale, "aiAnalysisNotConfigured"));
+      }
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const body = (await response.json()) as ApiResponse<OpportunityDetail>;
+      const aiAnalysis = body.data.documentIntelligence?.aiAnalysis;
+      setSelectedDetail(body.data);
+      setOpportunities((current) =>
+        current.map((opportunity) =>
+          opportunity.id === opportunityId
+            ? {
+                ...opportunity,
+                ...(aiAnalysis ? { aiAnalysis } : {})
+              }
+            : opportunity
+        )
+      );
+      void loadDashboard();
+    } catch (error) {
+      setAiAnalysisErrorMessage(
+        error instanceof Error ? error.message : t(locale, "aiAnalysisFailed")
+      );
+    } finally {
+      setAiAnalysisSaving(false);
+    }
+  }, [handleUnauthenticated, loadDashboard, locale, selectedDetail?.opportunity.id]);
 
   const primaryProfileId =
     opportunityProfileIds[0] ?? selectedProfileIds[0] ?? "software-development";
@@ -3166,6 +3234,8 @@ export function App() {
               detailLoadState={detailLoadState}
               detailErrorMessage={detailErrorMessage}
               economicsForm={economicsForm}
+              aiAnalysisErrorMessage={aiAnalysisErrorMessage}
+              aiAnalysisSaving={aiAnalysisSaving}
               pipelineErrorMessage={pipelineErrorMessage}
               pipelineForm={pipelineForm}
               pipelineSaving={pipelineSaving}
@@ -3179,6 +3249,7 @@ export function App() {
               selectedProfileIds={opportunityProfileIds}
               onChangeEconomicsField={updateEconomicsField}
               onChangePipelineField={updatePipelineField}
+              onRunPaidAiAnalysis={runPaidAiAnalysis}
               onSavePipeline={savePipelineState}
               onChangeAlertField={updateAlertField}
               onSaveAlertRule={saveAlertRule}
@@ -5443,6 +5514,8 @@ interface OpportunityPreviewProps {
   detailLoadState: LoadState;
   detailErrorMessage: string | undefined;
   economicsForm: EconomicsForm;
+  aiAnalysisErrorMessage: string | undefined;
+  aiAnalysisSaving: boolean;
   pipelineErrorMessage: string | undefined;
   pipelineForm: PipelineForm;
   pipelineSaving: boolean;
@@ -5456,6 +5529,7 @@ interface OpportunityPreviewProps {
   selectedProfileIds: BusinessProfileId[];
   onChangeEconomicsField(key: keyof EconomicsForm, value: string): void;
   onChangePipelineField(key: keyof PipelineForm, value: string): void;
+  onRunPaidAiAnalysis(): void;
   onSavePipeline(): void;
   onChangeAlertField(key: keyof AlertForm, value: string | boolean): void;
   onSaveAlertRule(): void;
@@ -5467,6 +5541,8 @@ function OpportunityPreview({
   detailLoadState,
   detailErrorMessage,
   economicsForm,
+  aiAnalysisErrorMessage,
+  aiAnalysisSaving,
   pipelineErrorMessage,
   pipelineForm,
   pipelineSaving,
@@ -5480,6 +5556,7 @@ function OpportunityPreview({
   selectedProfileIds,
   onChangeEconomicsField,
   onChangePipelineField,
+  onRunPaidAiAnalysis,
   onSavePipeline,
   onChangeAlertField,
   onSaveAlertRule
@@ -5784,8 +5861,27 @@ function OpportunityPreview({
       <section className="preview-section">
         <div className="section-heading">
           <h4>{t(locale, "documentIntelligence")}</h4>
-          <span>{formatDocumentStatus(intelligence?.status, locale)}</span>
+          <div className="section-actions">
+            <span>{formatDocumentStatus(intelligence?.status, locale)}</span>
+            <button
+              type="button"
+              className="secondary-action mini-action"
+              disabled={aiAnalysisSaving}
+              onClick={onRunPaidAiAnalysis}
+            >
+              {aiAnalysisSaving
+                ? t(locale, "runningAiAnalysis")
+                : intelligence?.aiAnalysis
+                  ? t(locale, "refreshPaidAiAnalysis")
+                  : t(locale, "runPaidAiAnalysis")}
+            </button>
+          </div>
         </div>
+        {aiAnalysisErrorMessage ? (
+          <div className="form-error" role="alert">
+            {aiAnalysisErrorMessage}
+          </div>
+        ) : null}
         {intelligence?.summary ? (
           <p className="summary-text">
             {formatGeneratedSummary(intelligence.summary, locale)}

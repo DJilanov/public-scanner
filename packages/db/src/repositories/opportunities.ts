@@ -34,10 +34,12 @@ import type {
 import type { QueryResultRow } from "pg";
 
 import type { Queryable } from "../client.js";
+import { upsertDocumentIntelligence } from "./document-intelligence.js";
 import type {
   CompetitorInsightRow,
   ContractAmendmentRow,
   ContractSummaryRow,
+  DocumentIntelligenceInput,
   DocumentIntelligenceRow,
   OpportunityListFilters,
   OpportunityLotRow,
@@ -835,6 +837,13 @@ export class OpportunityRepository implements OpportunityRepositoryPort {
     }
 
     return mapSavedOpportunityRow(row);
+  }
+
+  public async saveDocumentIntelligence(
+    opportunityId: string,
+    input: DocumentIntelligenceInput
+  ): Promise<void> {
+    await upsertDocumentIntelligence(this.db, opportunityId, input);
   }
 
   public async upsertScored(

@@ -1437,6 +1437,14 @@ button.text-button:hover:not(:disabled),
   white-space: nowrap;
 }
 
+.section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .score-breakdown,
 .compact-list,
 .checklist,

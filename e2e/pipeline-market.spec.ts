@@ -326,6 +326,9 @@ test("preview exposes detected TED document and submission links", async ({ page
   await expect(aiScorecard.getByText("88", { exact: true })).toBeVisible();
   await expect(aiScorecard.getByText("deepseek-v4-flash")).toBeVisible();
   await expect(aiScorecard.getByText("award criteria")).toBeVisible();
+  await page.getByRole("button", { name: "Refresh paid AI" }).click();
+  await expect(aiScorecard.getByText("92", { exact: true })).toBeVisible();
+  await expect(aiScorecard.getByText("pricing model")).toBeVisible();
   await expect(
     page.getByText("Official attachment bundle", { exact: true })
   ).toBeVisible();
@@ -465,6 +468,58 @@ async function mockApi(page: Page): Promise<void> {
       });
     }
   );
+
+  await page.route(/\/api\/opportunities\/ro-hardware-1\/ai-analysis$/, async (route) => {
+    await route.fulfill({
+      json: {
+        data: {
+          opportunity: {
+            ...dashboard.pipeline[1].opportunity,
+            description: "Hardware refresh with buyer portal documents.",
+            documentUrls: ["https://buyer.example.test/ro/documents"],
+            submissionUrls: ["https://buyer.example.test/ro/submit"],
+            match: {
+              score: 81,
+              reasons: []
+            },
+            aiAnalysis: {
+              ...documentIntelligence.aiAnalysis,
+              businessFitScore: 92,
+              missingData: ["pricing model"]
+            }
+          },
+          lots: [],
+          contracts: [],
+          amendments: [],
+          savedState: dashboard.pipeline[1].savedState,
+          documentIntelligence: {
+            ...documentIntelligence,
+            aiAnalysis: {
+              ...documentIntelligence.aiAnalysis,
+              businessFitScore: 92,
+              missingData: ["pricing model"]
+            }
+          },
+          documentPackage: {
+            items: buildMockDocumentPackageItems(true),
+            timeline: [],
+            clauses: [],
+            summary: {
+              itemCount: 3,
+              availableCount: 3,
+              needsAttentionCount: 0,
+              timelineCount: 0,
+              clauseCount: 0,
+              riskClauseCount: 0
+            },
+            coveragePercent: 100,
+            updatedAt: "2026-07-23T00:00:00.000Z"
+          },
+          competitorInsights: []
+        }
+      }
+    });
+  });
 
   await page.route(/\/api\/dashboard(\?|$)/, async (route) => {
     await route.fulfill({ json: { data: dashboard } });
